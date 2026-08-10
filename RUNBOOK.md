@@ -8,6 +8,8 @@ Repo: https://github.com/JoeLuci/bb-headless (private)
 
 ## Install on a new Mac
 
+Run from ANY single user session — you do NOT need to log into each user. The installer runs as root and handles all users on the Mac automatically.
+
 ```bash
 git clone https://github.com/JoeLuci/bb-headless.git /Users/Shared/bb-headless
 cd /Users/Shared/bb-headless
