@@ -1,0 +1,16 @@
+BB-HEADLESS: NEW MAC SETUP
+==========================
+
+Do this ONCE from any user (e.g. m01). This builds the headless server.
+
+1. Open Terminal
+
+2. Run these 3 commands:
+
+   git clone https://github.com/JoeLuci/bb-headless.git /Users/Shared/bb-headless
+   cd /Users/Shared/bb-headless
+   sudo bash install.sh --build-only
+
+3. Wait 3-5 minutes. When you see "Build complete" you're done.
+
+4. Now follow HOW-TO-SWITCH-USER.txt for each user on this Mac.

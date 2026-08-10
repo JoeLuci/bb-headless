@@ -1,0 +1,22 @@
+BB-HEADLESS: SWITCH A USER FROM ELECTRON TO HEADLESS
+=====================================================
+
+Do this for EACH user. Fast User Switch into their login first.
+
+1. Open Terminal
+
+2. Run this command:
+
+   bash /Users/Shared/bb-headless/switch-user.sh
+
+3. If you see "SUCCESS" you're done. Move to the next user.
+
+4. If it fails it automatically goes back to Electron. Check the log it tells you about.
+
+
+TO REVERT BACK TO ELECTRON
+===========================
+
+From that user's Terminal:
+
+   pkill -f 'node.*headless' && open -a BlueBubbles

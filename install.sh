@@ -37,6 +37,10 @@ log "=== bb-headless installer ==="
 log "Node: $($NODE_BIN --version)"
 mkdir -p "$INSTALL_DIR"
 
+# Copy docs to /Users/Shared/ so they're easy to find
+cp "$SCRIPT_DIR/HOW-TO-INSTALL.txt" /Users/Shared/ 2>/dev/null || true
+cp "$SCRIPT_DIR/HOW-TO-SWITCH-USER.txt" /Users/Shared/ 2>/dev/null || true
+
 # ── 1. Clone or update BlueBubbles ────────────────────────────────────────────
 clone_or_update() {
     if [ -d "$BB_REPO/.git" ]; then
