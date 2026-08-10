@@ -107,12 +107,18 @@ build_headless() {
         log "  WARNING: BlueBubbles.app not found — Private API will not work"
     fi
 
+    # Make build readable by all users
+    chmod -R a+rX "$INSTALL_DIR"
+
     log "  Build complete: $BB_SERVER/dist/headless.js"
 }
 
 # ── 4. Detect users and deploy ────────────────────────────────────────────────
 deploy_per_user() {
     log "[4/5] Deploying per-user LaunchAgents..."
+
+    # Ensure build directory is readable by all users
+    [ -d "$INSTALL_DIR" ] && chmod -R a+rX "$INSTALL_DIR"
 
     # Find all real users (UID >= 501)
     local users=()
@@ -185,6 +191,12 @@ PLISTEOF
 
         chown "$user:staff" "$plist_path"
         chmod 644 "$plist_path"
+
+        # Create log file with correct ownership so the process can write to it
+        local logfile="/var/log/bb-headless-$user.log"
+        touch "$logfile"
+        chown "$user:staff" "$logfile"
+
         log "  $user: LaunchAgent installed"
     done
 }

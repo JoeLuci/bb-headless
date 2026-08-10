@@ -8,7 +8,9 @@ Repo: https://github.com/JoeLuci/bb-headless (private)
 
 ## Install on a new Mac
 
-Run from ANY single user session — you do NOT need to log into each user. The installer runs as root and handles all users on the Mac automatically.
+Run from ANY single user session (e.g. m01) — you do NOT need to log into each user. The installer runs as root and handles ALL users on the Mac automatically.
+
+IMPORTANT: Always run the full install (not --deploy-only) on a new Mac. The full install clones the BB source, builds the headless server, and then deploys to all users.
 
 ```bash
 git clone https://github.com/JoeLuci/bb-headless.git /Users/Shared/bb-headless
@@ -16,13 +18,32 @@ cd /Users/Shared/bb-headless
 sudo bash install.sh
 ```
 
+Takes about 3-5 minutes (cloning + building). When it finishes, ALL users with BlueBubbles configured on that Mac will be switched from Electron to headless.
+
 This automatically:
-- Clones BlueBubbles source
+- Clones BlueBubbles source to /usr/local/lib/bb-headless/
 - Patches in the headless shim (replaces Electron with Node.js stubs)
 - Builds with webpack
 - Copies Private API dylib from BlueBubbles.app (must be installed)
+- Sets file permissions so all users can access the build
+- Creates per-user log files at /var/log/bb-headless-USERNAME.log
 - For every user with a config.db: creates a LaunchAgent, stops Electron BB, starts headless BB
 - Each user's existing config (port, server_address, password, webhooks, Cloudflare tunnel) is preserved — headless reads the same config.db
+
+## Verify after install
+
+```bash
+# Check all users are running
+for u in m01 m02 m03 m04 m05; do
+  PID=$(pgrep -u $u -f "node.*headless" | head -1)
+  if [ -n "$PID" ]; then
+    PORT=$(lsof -nP -iTCP -sTCP:LISTEN -a -p $PID 2>/dev/null | grep LISTEN | awk '{print $9}' | head -1)
+    echo "$u: RUNNING (PID $PID) on $PORT"
+  else
+    echo "$u: NOT RUNNING — check /var/log/bb-headless-$u.log"
+  fi
+done
+```
 
 ## Update
 
@@ -41,24 +62,12 @@ Or revert a single user:
 sudo -u m02 pkill -f 'node.*headless' && sudo -u m02 open -a BlueBubbles
 ```
 
-## Build only (don't deploy)
-
-```bash
-sudo bash install.sh --build-only
-```
-
-## Deploy only (skip build)
-
-```bash
-sudo bash install.sh --deploy-only
-```
-
 ## Prerequisites per Mac
 
 - Node.js installed (`node` in PATH)
 - BlueBubbles.app installed (for Private API dylib)
 - Each user must have been set up with Electron BB at least once (config.db must exist with port, password, server address, Cloudflare tunnel configured)
-- `gh auth login` done if cloning from GitHub (or use HTTPS token)
+- GitHub CLI authenticated (`gh auth login`) or use HTTPS token for cloning
 
 ## Logs
 
@@ -97,6 +106,11 @@ This contains: socket_port, server_address, password, proxy_service, webhooks, F
 
 The headless server reads this same database. Cloudflare Zero Trust tunnels point to localhost:PORT per user — no changes needed.
 
+Build lives at:
+```
+/usr/local/lib/bb-headless/bluebubbles-server/packages/server/dist/headless.js
+```
+
 LaunchAgents are installed at:
 ```
 ~/Library/LaunchAgents/com.bb-headless.server.plist
@@ -107,16 +121,16 @@ They auto-start on login and auto-restart on crash (KeepAlive).
 ## Why this fixes the crashes
 
 - Electron BB = Chromium GUI window + renderer + GPU compositing per user
-- 5 users × Electron = WindowServer managing 5 full GUI sessions
-- WindowServer bloats to 1GB+ over days → watchdog kills it → Mac crashes
-- Headless BB = plain Node.js process → WindowServer manages 0 BB windows
-- WindowServer stays at ~50-80 MB → never crashes
+- 5 users x Electron = WindowServer managing 5 full GUI sessions
+- WindowServer bloats to 1GB+ over days -> watchdog kills it -> Mac crashes
+- Headless BB = plain Node.js process -> WindowServer manages 0 BB windows
+- WindowServer stays at ~50-80 MB -> never crashes
 
 ## File structure
 
 ```
-bb-headless/
-├── install.sh                      # Main installer
+bb-headless/                        (lives at /Users/Shared/bb-headless)
+├── install.sh                      # Main installer — run with sudo
 ├── uninstall.sh                    # Revert to Electron
 ├── RUNBOOK.md                      # This file
 └── src/
@@ -128,10 +142,14 @@ bb-headless/
 
 ## Troubleshooting
 
+**Users NOT RUNNING after install**: Run the full install, not --deploy-only. The build must exist at /usr/local/lib/bb-headless/ first. Check the user's log: `cat /var/log/bb-headless-USERNAME.log`
+
 **"Private API Helper is not connected"**: BlueBubbles.app must be installed so the dylib can be copied. Run `sudo bash install.sh` again after installing BB.app.
 
 **Messages not sending**: Check that Messages.app is running for that user. The headless server starts it via AppleScript.
 
 **Port conflict**: Make sure Electron BB is fully stopped before headless starts. `pkill -u USERNAME -f BlueBubbles.app`
 
-**LaunchAgent not starting**: Check `launchctl print gui/UID/com.bb-headless.server` and the user's log at `/var/log/bb-headless-USERNAME.log`.
+**LaunchAgent not starting**: Check `launchctl print gui/UID/com.bb-headless.server` and the user's log at `/var/log/bb-headless-USERNAME.log`
+
+**Permission denied errors**: Run `sudo chmod -R a+rX /usr/local/lib/bb-headless/` then re-run `sudo bash install.sh --deploy-only`
