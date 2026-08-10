@@ -6,19 +6,31 @@ Runs BlueBubbles Server as a plain Node.js process instead of Electron. Eliminat
 
 Repo: https://github.com/JoeLuci/bb-headless (private)
 
-## Install on a new Mac
+## Install on a new Mac (2 steps)
 
-Run from ANY single user session (e.g. m01) — you do NOT need to log into each user. The installer runs as root and handles ALL users on the Mac automatically.
+### Step 1: Build (once per Mac, from any user)
 
-IMPORTANT: Always run the full install (not --deploy-only) on a new Mac. The full install clones the BB source, builds the headless server, and then deploys to all users.
+Log into any user (e.g. m01) and run:
 
 ```bash
 git clone https://github.com/JoeLuci/bb-headless.git /Users/Shared/bb-headless
 cd /Users/Shared/bb-headless
-sudo bash install.sh
+sudo bash install.sh --build-only
 ```
 
-Takes about 3-5 minutes (cloning + building). When it finishes, ALL users with BlueBubbles configured on that Mac will be switched from Electron to headless.
+Takes about 3-5 minutes (clones BB source, builds headless server). Only needs to be done once per Mac.
+
+### Step 2: Switch each user (from each login)
+
+Fast User Switch into each user and run:
+
+```bash
+bash /Users/Shared/bb-headless/switch-user.sh
+```
+
+No sudo needed. It kills Electron BB, starts headless BB, and verifies it's working. Takes 10 seconds per user.
+
+If it fails, it automatically reverts to Electron BB.
 
 This automatically:
 - Clones BlueBubbles source to /usr/local/lib/bb-headless/
@@ -57,9 +69,9 @@ cd /Users/Shared/bb-headless && git pull && sudo bash install.sh
 sudo bash /Users/Shared/bb-headless/uninstall.sh
 ```
 
-Or revert a single user:
+Or revert a single user (run from their login):
 ```bash
-sudo -u m02 pkill -f 'node.*headless' && sudo -u m02 open -a BlueBubbles
+pkill -f 'node.*headless' && open -a BlueBubbles
 ```
 
 ## Prerequisites per Mac
