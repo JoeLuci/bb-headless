@@ -70,11 +70,47 @@ SERVER=$(sqlite3 "$CONFIG_DB" "SELECT value FROM config WHERE name='server_addre
 echo "  Port: $PORT"
 echo "  Server: $SERVER"
 
-# Kill Electron BB (scoped to this user — never touch other logins' processes)
-if pgrep -u "$USER_NAME" -f "BlueBubbles.app" >/dev/null 2>&1; then
+# Stop Electron BB. This MUST succeed — Electron holds the same port the
+# headless server needs to bind, so leaving it running silently breaks the
+# switch. Escalate: graceful quit -> TERM -> KILL, verifying after each.
+electron_running() {
+    pgrep -u "$USER_NAME" -f "BlueBubbles.app" >/dev/null 2>&1
+}
+
+wait_for_exit() {
+    local tries=$1 i
+    for ((i = 0; i < tries; i++)); do
+        electron_running || return 0
+        sleep 1
+    done
+    return 1
+}
+
+if electron_running; then
     echo "  Stopping Electron BlueBubbles..."
-    pkill -u "$USER_NAME" -f "BlueBubbles.app" 2>/dev/null || true
-    sleep 2
+
+    # 1. Ask it to quit properly, so Electron can shut down its own subprocesses.
+    osascript -e 'tell application "BlueBubbles" to quit' >/dev/null 2>&1 || true
+    wait_for_exit 10 || {
+        # 2. SIGTERM (also catches Electron helper processes).
+        echo "  Not responding — sending TERM..."
+        pkill -u "$USER_NAME" -f "BlueBubbles.app" 2>/dev/null || true
+        wait_for_exit 10 || {
+            # 3. SIGKILL.
+            echo "  Still running — sending KILL..."
+            pkill -9 -u "$USER_NAME" -f "BlueBubbles.app" 2>/dev/null || true
+            wait_for_exit 5 || true
+        }
+    }
+
+    if electron_running; then
+        echo ""
+        echo "ERROR: could not stop Electron BlueBubbles."
+        echo "Quit it manually (BlueBubbles > Quit, or force-quit), then re-run."
+        echo "Not starting headless — it would fail to bind port $PORT."
+        exit 1
+    fi
+    echo "  Electron stopped."
 fi
 
 # Kill any existing headless
@@ -91,13 +127,29 @@ nohup "$NODE_BIN" "$HEADLESS" >> "$LOG" 2>&1 &
 BBPID=$!
 echo "  PID: $BBPID"
 
-sleep 5
+# Verify: the process must be alive AND actually listening on its port.
+# A bare liveness check passes even when the server died on a bind conflict.
+listening() {
+    [ "$PORT" = "unknown" ] && return 0   # can't check; fall back to liveness
+    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+}
 
-# Verify
-if kill -0 $BBPID 2>/dev/null; then
+OK=false
+for ((i = 0; i < 30; i++)); do
+    if ! kill -0 "$BBPID" 2>/dev/null; then
+        break                              # died — stop waiting
+    fi
+    if listening; then
+        OK=true
+        break
+    fi
+    sleep 1
+done
+
+if $OK; then
     echo ""
     echo "=== SUCCESS ==="
-    echo "$USER_NAME is now running headless BlueBubbles (PID $BBPID)"
+    echo "$USER_NAME is now running headless BlueBubbles (PID $BBPID, port $PORT)"
     echo "Logs: tail -f $LOG"
     echo ""
     echo "To revert: pkill -u \$(whoami) -f 'node.*headless' && open -a BlueBubbles"
@@ -107,6 +159,13 @@ if kill -0 $BBPID 2>/dev/null; then
 else
     echo ""
     echo "=== FAILED — reverting to Electron ==="
+    if kill -0 "$BBPID" 2>/dev/null; then
+        echo "Server started but never listened on port $PORT — stopping it."
+        kill "$BBPID" 2>/dev/null || true
+    else
+        echo "Server exited on startup."
+    fi
     open -a BlueBubbles
-    echo "Check log: cat $LOG"
+    echo "Check log: tail -50 $LOG"
+    exit 1
 fi
