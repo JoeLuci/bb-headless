@@ -7,24 +7,53 @@
 
 set -euo pipefail
 
+# NEVER run this with sudo. As root it reads root's config.db (not yours) and
+# leaves an orphaned server attached to whichever user's Messages data it finds.
+if [ "$(id -u)" -eq 0 ]; then
+    echo "ERROR: do not run this with sudo."
+    echo "Run it as yourself, from your own login:"
+    echo "  bash /Users/Shared/bb-headless/switch-user.sh"
+    echo "(Only install.sh needs sudo.)"
+    exit 1
+fi
+
 USER_NAME="$(whoami)"
 BB_SERVER="/usr/local/lib/bb-headless/bluebubbles-server/packages/server"
 HEADLESS="$BB_SERVER/dist/headless.js"
-NODE_BIN="$(which node 2>/dev/null || echo "/usr/local/bin/node")"
-LOG="/var/log/bb-headless-$USER_NAME.log"
+
+# Log into the user's own Library — /var/log is root-owned, so writing there is
+# what used to make this script look like it needed sudo.
+LOG_DIR="$HOME/Library/Logs"
+LOG="$LOG_DIR/bb-headless.log"
+mkdir -p "$LOG_DIR"
+
+# Prefer the system-wide node the installer places at /usr/local/bin/node.
+NODE_BIN=""
+for candidate in \
+    "/usr/local/bin/node" \
+    "/usr/local/lib/nodejs/bin/node" \
+    "/opt/homebrew/bin/node" \
+    "$(command -v node 2>/dev/null || true)"
+do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        NODE_BIN="$candidate"
+        break
+    fi
+done
 
 echo "=== Switching $USER_NAME to headless BlueBubbles ==="
 
 # Check headless.js exists
 if [ ! -f "$HEADLESS" ]; then
     echo "ERROR: headless.js not found at $HEADLESS"
-    echo "Run 'sudo bash /Users/Shared/bb-headless/install.sh --build-only' first from any user."
+    echo "Run 'sudo bash /Users/Shared/bb-headless/install.sh' first from any user."
     exit 1
 fi
 
 # Check node exists
-if [ ! -x "$NODE_BIN" ]; then
-    echo "ERROR: node not found. Install Node.js first."
+if [ -z "$NODE_BIN" ]; then
+    echo "ERROR: node not found."
+    echo "Run 'sudo bash /Users/Shared/bb-headless/install.sh' — it installs Node system-wide."
     exit 1
 fi
 
@@ -41,17 +70,17 @@ SERVER=$(sqlite3 "$CONFIG_DB" "SELECT value FROM config WHERE name='server_addre
 echo "  Port: $PORT"
 echo "  Server: $SERVER"
 
-# Kill Electron BB
+# Kill Electron BB (scoped to this user — never touch other logins' processes)
 if pgrep -u "$USER_NAME" -f "BlueBubbles.app" >/dev/null 2>&1; then
     echo "  Stopping Electron BlueBubbles..."
-    pkill -f "BlueBubbles.app" 2>/dev/null || true
+    pkill -u "$USER_NAME" -f "BlueBubbles.app" 2>/dev/null || true
     sleep 2
 fi
 
 # Kill any existing headless
 if pgrep -u "$USER_NAME" -f "node.*headless" >/dev/null 2>&1; then
     echo "  Stopping existing headless..."
-    pkill -f "node.*headless" 2>/dev/null || true
+    pkill -u "$USER_NAME" -f "node.*headless" 2>/dev/null || true
     sleep 1
 fi
 
@@ -71,7 +100,10 @@ if kill -0 $BBPID 2>/dev/null; then
     echo "$USER_NAME is now running headless BlueBubbles (PID $BBPID)"
     echo "Logs: tail -f $LOG"
     echo ""
-    echo "To revert: pkill -f 'node.*headless' && open -a BlueBubbles"
+    echo "To revert: pkill -u \$(whoami) -f 'node.*headless' && open -a BlueBubbles"
+    echo ""
+    echo "NOTE: this run does not survive logout or reboot."
+    echo "For that, use: sudo bash /Users/Shared/bb-headless/install.sh"
 else
     echo ""
     echo "=== FAILED — reverting to Electron ==="

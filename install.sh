@@ -17,7 +17,13 @@ INSTALL_DIR="/usr/local/lib/bb-headless"
 BB_REPO="$INSTALL_DIR/bluebubbles-server"
 BB_SERVER="$BB_REPO/packages/server"
 LOG="/var/log/bb-headless-install.log"
-NODE_BIN="$(which node 2>/dev/null || echo "/usr/local/bin/node")"
+
+# Node is installed system-wide so EVERY user login can reach it. A node that
+# lives under /Users/<someone> (nvm, asdf, a per-user Homebrew) is unusable by
+# other logins — their home dirs are not world-readable — so we ignore those.
+NODE_PREFIX="/usr/local/lib/nodejs"
+NODE_VERSION="${NODE_VERSION:-v24.19.0}"
+NODE_BIN=""
 
 BUILD_ONLY=false
 DEPLOY_ONLY=false
@@ -31,10 +37,79 @@ done
 log() { echo "$(date '+%H:%M:%S') $*" | tee -a "$LOG"; }
 
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: must run as root (use sudo)"; exit 1; }
-[ -x "$NODE_BIN" ] || { echo "ERROR: node not found. Install Node.js first."; exit 1; }
+
+# ── 0. Node.js ────────────────────────────────────────────────────────────────
+# Find a node that all users can execute. Anything under /Users/ is per-user
+# only, so it does not count even if it is first on this root shell's PATH.
+find_shared_node() {
+    local candidate
+    for candidate in \
+        "/usr/local/bin/node" \
+        "$NODE_PREFIX/bin/node" \
+        "/opt/homebrew/bin/node" \
+        "$(command -v node 2>/dev/null || true)"
+    do
+        [ -n "$candidate" ] || continue
+        [ -x "$candidate" ] || continue
+        case "$(cd "$(dirname "$candidate")" && pwd -P)" in
+            /Users/*) continue ;;   # per-user install, not shared
+        esac
+        echo "$candidate"
+        return 0
+    done
+    return 1
+}
+
+install_node() {
+    local narch tarball url tmp
+    case "$(uname -m)" in
+        arm64)  narch="darwin-arm64" ;;
+        x86_64) narch="darwin-x64" ;;
+        *) log "ERROR: unsupported architecture $(uname -m)"; exit 1 ;;
+    esac
+
+    tarball="node-$NODE_VERSION-$narch.tar.gz"
+    url="https://nodejs.org/dist/$NODE_VERSION/$tarball"
+    tmp="$(mktemp -d)"
+
+    log "  Downloading $tarball..."
+    if ! curl -fsSL --retry 3 "$url" -o "$tmp/$tarball"; then
+        rm -rf "$tmp"
+        log "ERROR: failed to download Node from $url"
+        log "       Check network access, or install Node manually and re-run."
+        exit 1
+    fi
+
+    rm -rf "$NODE_PREFIX"
+    mkdir -p "$NODE_PREFIX"
+    tar -xzf "$tmp/$tarball" -C "$NODE_PREFIX" --strip-components=1
+    rm -rf "$tmp"
+
+    # World-readable/executable so every login can run it
+    chmod -R a+rX "$NODE_PREFIX"
+    mkdir -p /usr/local/bin
+    ln -sf "$NODE_PREFIX/bin/node" /usr/local/bin/node
+    ln -sf "$NODE_PREFIX/bin/npm"  /usr/local/bin/npm
+    ln -sf "$NODE_PREFIX/bin/npx"  /usr/local/bin/npx
+}
+
+ensure_node() {
+    if NODE_BIN="$(find_shared_node)"; then
+        log "Node: $("$NODE_BIN" --version) ($NODE_BIN)"
+    else
+        log "Node not found system-wide — installing $NODE_VERSION..."
+        install_node
+        NODE_BIN="/usr/local/bin/node"
+        log "Node installed: $("$NODE_BIN" --version) ($NODE_BIN)"
+    fi
+
+    # npm/npx are invoked bare during the build, so put node's bin dir on PATH.
+    PATH="$(dirname "$NODE_BIN"):$PATH"
+    export PATH
+}
 
 log "=== bb-headless installer ==="
-log "Node: $($NODE_BIN --version)"
+ensure_node
 mkdir -p "$INSTALL_DIR"
 
 # Copy docs to /Users/Shared/ so they're easy to find
