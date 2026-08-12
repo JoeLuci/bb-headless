@@ -167,6 +167,15 @@ build_headless() {
     npm rebuild node-mac-contacts >> "$LOG" 2>&1 || true
     npm rebuild node-mac-permissions >> "$LOG" 2>&1 || true
 
+    # Verify the DB module actually loads with the system node. A half-installed
+    # node_modules (e.g. a previous install interrupted mid-`npm install`) is
+    # otherwise only discovered at user runtime as a crash-looping server.
+    if ! (cd "$BB_SERVER" && "$NODE_BIN" -e "require('better-sqlite3')") >> "$LOG" 2>&1; then
+        log "ERROR: better-sqlite3 failed to load after install — aborting."
+        log "       node_modules is likely incomplete. Re-run: sudo bash install.sh"
+        exit 1
+    fi
+
     # Create runtime electron shim (for electron-log and other runtime requires)
     for SHIM_LOC in "$BB_REPO/node_modules/electron" "$BB_SERVER/node_modules/electron"; do
         mkdir -p "$SHIM_LOC"
@@ -315,13 +324,22 @@ activate_headless() {
             log "  $user: disabled Electron LaunchAgent"
         fi
 
-        # Load headless LaunchAgent
+        # Load headless LaunchAgent. No `launchctl load` fallback here: run as
+        # root it does not target the user's gui domain, so it reports success
+        # ("legacy") while actually leaving the agent unloaded — the server is
+        # then down with nothing to restart it after logout/reboot.
         launchctl bootout "gui/$uid/com.bb-headless.server" 2>/dev/null || true
         if launchctl bootstrap "gui/$uid" "$plist_path" 2>/dev/null; then
             log "  $user: headless server STARTED"
         else
-            launchctl load -w "$plist_path" 2>/dev/null && log "  $user: headless server STARTED (legacy)" || \
-                log "  $user: WARNING — failed to start LaunchAgent"
+            sleep 2
+            if launchctl bootstrap "gui/$uid" "$plist_path" 2>/dev/null; then
+                log "  $user: headless server STARTED (after retry)"
+            else
+                log "  $user: WARNING — could not load LaunchAgent (no gui session for $user?)"
+                log "  $user: fix from that login with: bash $SCRIPT_DIR/switch-user.sh"
+                continue
+            fi
         fi
 
         # Verify it's running
