@@ -120,12 +120,72 @@ if pgrep -u "$USER_NAME" -f "node.*headless" >/dev/null 2>&1; then
     sleep 1
 fi
 
-# Start headless
+# Install LaunchAgent so it survives logout/reboot
+AGENT_DIR="$HOME/Library/LaunchAgents"
+PLIST="$AGENT_DIR/com.bb-headless.server.plist"
+mkdir -p "$AGENT_DIR"
+
+# Unload old one if present
+launchctl bootout "gui/$(id -u)/com.bb-headless.server" 2>/dev/null || true
+
+cat > "$PLIST" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bb-headless.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$NODE_BIN</string>
+        <string>$HEADLESS</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$BB_SERVER</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>$LOG</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
+PLISTEOF
+
+echo "  LaunchAgent installed (survives logout/reboot)"
+
+# Also disable Electron auto-start if present
+ELECTRON_PLIST="$AGENT_DIR/com.bluebubbles.server.plist"
+if [ -f "$ELECTRON_PLIST" ]; then
+    launchctl bootout "gui/$(id -u)/com.bluebubbles.server" 2>/dev/null || true
+    mv "$ELECTRON_PLIST" "$ELECTRON_PLIST.disabled" 2>/dev/null || true
+    echo "  Disabled Electron auto-start"
+fi
+
+# Start headless via LaunchAgent
 echo "  Starting headless BlueBubbles..."
 cd "$BB_SERVER"
-nohup "$NODE_BIN" "$HEADLESS" >> "$LOG" 2>&1 &
-BBPID=$!
-echo "  PID: $BBPID"
+if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
+    sleep 2
+    BBPID=$(pgrep -u "$USER_NAME" -f "node.*headless" | head -1)
+    echo "  PID: ${BBPID:-starting...}"
+else
+    # Fallback: start directly
+    nohup "$NODE_BIN" "$HEADLESS" >> "$LOG" 2>&1 &
+    BBPID=$!
+    echo "  PID: $BBPID (direct start)"
+fi
 
 # Verify: the process must be alive AND actually listening on its port.
 # A bare liveness check passes even when the server died on a bind conflict.
@@ -150,12 +210,10 @@ if $OK; then
     echo ""
     echo "=== SUCCESS ==="
     echo "$USER_NAME is now running headless BlueBubbles (PID $BBPID, port $PORT)"
+    echo "Auto-starts on login/reboot."
     echo "Logs: tail -f $LOG"
     echo ""
-    echo "To revert: pkill -u \$(whoami) -f 'node.*headless' && open -a BlueBubbles"
-    echo ""
-    echo "NOTE: this run does not survive logout or reboot."
-    echo "For that, use: sudo bash /Users/Shared/bb-headless/install.sh"
+    echo "To revert: launchctl bootout gui/$(id -u)/com.bb-headless.server && open -a BlueBubbles"
 else
     echo ""
     echo "=== FAILED — reverting to Electron ==="
