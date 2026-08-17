@@ -125,12 +125,16 @@ for u in $BB_SCREENSHARING_USERS; do
     fi
 done
 
-if launchctl print system/com.apple.screensharing >/dev/null 2>&1; then
+# IMPORTANT: "service is loaded" (launchctl print) is NOT "sharing is enabled".
+# macOS loads screensharingd on-demand either way; clients then get
+# "Screen sharing is not permitted" until the launchd override DB says enabled.
+# The authoritative check is print-disabled. (Found the hard way on box 1.)
+if launchctl print-disabled system | grep -q '"com.apple.screensharing" => enabled'; then
     skip_step "Screen Sharing already enabled"
 else
     launchctl enable system/com.apple.screensharing
     launchctl bootstrap system /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
-    launchctl kickstart system/com.apple.screensharing 2>/dev/null || true
+    launchctl kickstart -k system/com.apple.screensharing 2>/dev/null || true
     done_step "Enabled Screen Sharing (group-restricted; legacy VNC and ARD untouched)"
 fi
 
