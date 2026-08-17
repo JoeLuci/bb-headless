@@ -70,6 +70,13 @@ SERVER=$(sqlite3 "$CONFIG_DB" "SELECT value FROM config WHERE name='server_addre
 echo "  Port: $PORT"
 echo "  Server: $SERVER"
 
+# FindMy costs ~200 MB/session and only feeds the app's locations feature.
+# Same default as install.sh; BB_KEEP_FINDMY=1 to keep it.
+if [ "${BB_KEEP_FINDMY:-0}" != "1" ]; then
+    sqlite3 "$CONFIG_DB" "UPDATE config SET value='0' WHERE name='open_findmy_on_startup';" 2>/dev/null \
+        && echo "  FindMy-on-startup: disabled"
+fi
+
 # Stop Electron BB. This MUST succeed — Electron holds the same port the
 # headless server needs to bind, so leaving it running silently breaks the
 # switch. Escalate: graceful quit -> TERM -> KILL, verifying after each.
