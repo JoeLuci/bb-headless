@@ -26,7 +26,8 @@
 #   BB_ADMIN_USER=m01                admin account for SSH + brew
 #   BB_SCREENSHARING_USERS="m01"     space-separated allowlist
 #   TS_AUTHKEY                       required only if Tailscale is not up yet
-#   BB_ADMIN_PUBKEY                  required only if key not yet installed
+#   BB_ADMIN_PUBKEY                  defaults to Joe's laptop key (public, safe
+#                                    in the repo); override to use another key
 #
 # Deploy to all Macs:
 #   for mac in mac1 mac2 ...; do
@@ -38,6 +39,9 @@ set -euo pipefail
 
 BB_ADMIN_USER="${BB_ADMIN_USER:-m01}"
 BB_SCREENSHARING_USERS="${BB_SCREENSHARING_USERS:-m01}"
+# Public half of the admin keypair - safe to commit; the private half never
+# leaves Joe's laptop.
+BB_ADMIN_PUBKEY="${BB_ADMIN_PUBKEY:-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHmuQ3rHXmKVJuJXRwEy6+heabNN075idY2RlVxRCZy4 joe-laptop}"
 LOG_FILE="/var/log/bb-remote-admin.log"
 SSHD_DROPIN="/etc/ssh/sshd_config.d/100-bb-remote-admin.conf"
 BREW="/opt/homebrew/bin/brew"
