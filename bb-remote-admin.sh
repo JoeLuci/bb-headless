@@ -191,11 +191,22 @@ fi
 if [ "$HAVE_FDA" -eq 1 ]; then
     if systemsetup -getremotelogin 2>/dev/null | grep -qi ": on"; then
         skip_step "Remote Login already on"
+    elif systemsetup -setremotelogin on >>"$LOG_FILE" 2>&1; then
+        done_step "Enabled Remote Login (SSH) via systemsetup"
     else
-        systemsetup -setremotelogin on >/dev/null
-        done_step "Enabled Remote Login (SSH)"
+        # systemsetup is TCC-fussy in some invocation contexts; the launchd
+        # service (ssh.plist -> com.openssh.sshd) is the same thing.
+        launchctl enable system/com.openssh.sshd
+        launchctl bootstrap system /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+        done_step "Enabled Remote Login (SSH) via launchctl (systemsetup refused)"
     fi
     launchctl kickstart -k system/com.openssh.sshd 2>/dev/null || true
+    sleep 2
+    if nc -z -w 3 localhost 22 >/dev/null 2>&1; then
+        done_step "sshd verified listening on port 22"
+    else
+        log "WARNING: port 22 still not answering - check 'launchctl print system/com.openssh.sshd'"
+    fi
 else
     skip_step "Remote Login: needs Full Disk Access. Grant it: System Settings > Privacy & Security > Full Disk Access > enable your terminal app (or sshd), then re-run this script."
 fi
