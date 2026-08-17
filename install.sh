@@ -237,6 +237,14 @@ deploy_per_user() {
 
         log "  $user: port=$port, server=$server_addr"
 
+        # FindMy.app costs ~200 MB per session and only feeds the client app's
+        # locations feature. Off by default; set BB_KEEP_FINDMY=1 to leave it.
+        if [ "${BB_KEEP_FINDMY:-0}" != "1" ]; then
+            sqlite3 "$config_db" "UPDATE config SET value='0' WHERE name='open_findmy_on_startup';" 2>/dev/null \
+                && log "  $user: open_findmy_on_startup=0" \
+                || log "  $user: could not set open_findmy_on_startup (missing key?)"
+        fi
+
         # Create LaunchAgent
         local agent_dir="$home/Library/LaunchAgents"
         local plist_path="$agent_dir/com.bb-headless.server.plist"
