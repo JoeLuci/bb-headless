@@ -238,11 +238,18 @@ fi
 
 if "$TS_BIN" status >/dev/null 2>&1; then
     skip_step "Tailscale already up"
-else
-    [ -n "${TS_AUTHKEY:-}" ] || die "TS_AUTHKEY is not set and Tailscale is not up. Export an auth key from the admin console: TS_AUTHKEY=tskey-auth-..."
+elif [ -n "${TS_AUTHKEY:-}" ]; then
     "$TS_BIN" up --authkey "$TS_AUTHKEY" --ssh >>"$LOG_FILE" 2>&1 \
         || die "tailscale up failed - see $LOG_FILE"
-    done_step "Tailscale up with Tailscale SSH (remember: scope it in tailnet ACLs)"
+    done_step "Tailscale up via auth key, with Tailscale SSH"
+else
+    # No key: interactive join. tailscale prints a login URL - open it on any
+    # signed-in device (the operator's phone) and tap approve. No secrets.
+    log ">>> Tailscale needs a one-time approval. A login URL will appear below."
+    log ">>> Open it on your phone (Tailscale app signed in) and tap Approve."
+    "$TS_BIN" up --ssh \
+        || die "tailscale interactive login failed or was not approved"
+    done_step "Tailscale up via interactive approval, with Tailscale SSH"
 fi
 
 # ── 4. Lockdown ─────────────────────────────────────────────────────────────

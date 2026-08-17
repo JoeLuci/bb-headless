@@ -48,13 +48,10 @@ bash "$DEST/install.sh"
 echo "== bb-metrics install =="
 bash "$DEST/bb-metrics.sh" install
 
-if [ -n "${TS_AUTHKEY:-}" ] || [ -n "${BB_ADMIN_PUBKEY:-}" ] || /opt/homebrew/bin/tailscale status >/dev/null 2>&1; then
-    echo "== bb-remote-admin =="
-    bash "$DEST/bb-remote-admin.sh"
-else
-    echo "== bb-remote-admin SKIPPED: no secrets.env on the drive and Tailscale not up =="
-    echo "   Create secrets.env next to deploy.sh (see header) and re-run."
-fi
+# No secrets required: without TS_AUTHKEY, the Tailscale step prints a login
+# URL - open it on a signed-in phone and tap Approve.
+echo "== bb-remote-admin =="
+bash "$DEST/bb-remote-admin.sh"
 
 echo ""
 echo "== deploy.sh done =="
