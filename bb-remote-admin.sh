@@ -159,6 +159,13 @@ fi
 grep -q '^Include /etc/ssh/sshd_config.d/\*' /etc/ssh/sshd_config \
     || die "/etc/ssh/sshd_config has no Include for sshd_config.d - unexpected macOS config"
 
+# A box that has never had Remote Login on has no host keys, and sshd -t
+# refuses to validate anything without them. Generate the missing ones.
+if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+    ssh-keygen -A >/dev/null 2>&1
+    done_step "Generated SSH host keys"
+fi
+
 DROPIN_CONTENT="# Managed by bb-remote-admin.sh - do not edit by hand
 PasswordAuthentication no
 KbdInteractiveAuthentication no
