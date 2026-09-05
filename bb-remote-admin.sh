@@ -273,18 +273,47 @@ fi
 
 NXSERVER="$(nm_bin)"
 
+# NoMachine 10 renamed --activate to --subscriptionset; try the new name and
+# fall back. BB_NM_LICENSE may be a .lic file or the key.tar.gz NoMachine
+# issues from the User Area, which holds server.lic (and node.lic) - every .lic
+# inside gets deployed. Until one is in place the server answers every
+# connection with "No subscription found on this server".
+nm_set_licence() {
+    "$NXSERVER" --subscriptionset "$1" >>"$LOG_FILE" 2>&1 \
+        || "$NXSERVER" --activate "$1" >>"$LOG_FILE" 2>&1
+}
+
 if [ -n "${BB_NM_LICENSE:-}" ]; then
-    if [ ! -f "$BB_NM_LICENSE" ]; then
-        die "BB_NM_LICENSE=$BB_NM_LICENSE does not exist"
-    elif [ -f "$NM_ETC/server.lic" ] && cmp -s "$BB_NM_LICENSE" "$NM_ETC/server.lic"; then
-        skip_step "NoMachine licence already activated"
+    [ -f "$BB_NM_LICENSE" ] || die "BB_NM_LICENSE=$BB_NM_LICENSE does not exist"
+    NM_SUB="$("$NXSERVER" --subscriptioninfo 2>&1 || true)"
+    if ! printf '%s' "$NM_SUB" | grep -q "No subscription found"; then
+        skip_step "NoMachine already has a subscription: $(printf '%s' "$NM_SUB" | grep -vi warning | head -1 | tr -d '\n')"
     else
-        "$NXSERVER" --activate "$BB_NM_LICENSE" >>"$LOG_FILE" 2>&1 \
-            || die "nxserver --activate failed for $BB_NM_LICENSE - see $LOG_FILE"
-        done_step "Activated NoMachine licence"
+        NM_LIC_TMP=""
+        case "$BB_NM_LICENSE" in
+            *.tar.gz|*.tgz)
+                NM_LIC_TMP="$(mktemp -d)"
+                tar -xzf "$BB_NM_LICENSE" -C "$NM_LIC_TMP" || die "Could not extract $BB_NM_LICENSE"
+                LIC_FILES="$(find "$NM_LIC_TMP" -name '*.lic' | sort || true)"
+                ;;
+            *) LIC_FILES="$BB_NM_LICENSE" ;;
+        esac
+        [ -n "$LIC_FILES" ] || die "No .lic file found in $BB_NM_LICENSE"
+        for f in $LIC_FILES; do
+            nm_set_licence "$f" || die "nxserver could not deploy $(basename "$f") - see $LOG_FILE"
+        done
+        if [ -n "$NM_LIC_TMP" ]; then rm -rf "$NM_LIC_TMP"; fi
+        NM_CHANGED=1
+        done_step "Deployed NoMachine subscription ($(for f in $LIC_FILES; do basename "$f"; done | tr '\n' ' '))"
     fi
 else
-    skip_step "BB_NM_LICENSE unset - running on whatever licence the package ships (Personal Edition is personal/non-commercial only)"
+    if "$NXSERVER" --subscriptioninfo 2>&1 | grep -q "No subscription found"; then
+        log "WARNING: NoMachine has NO subscription - it will refuse every connection until one is deployed."
+        log "         Get a 14-day trial from your nomachine.com User Area, then re-run with BB_NM_LICENSE=/path/to/key.tar.gz"
+        skip_step "NoMachine subscription (none deployed, BB_NM_LICENSE unset)"
+    else
+        skip_step "NoMachine subscription already present"
+    fi
 fi
 
 if [ -f "$NM_CFG" ]; then
