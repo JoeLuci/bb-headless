@@ -35,6 +35,8 @@
 #                                    up yet; without it you get a login URL
 #   BB_ADMIN_PUBKEY                  defaults to Joe's laptop key (public, safe
 #                                    in the repo); override to use another key
+#   BB_NOMACHINE=1                   0 = skip the NoMachine step entirely, for
+#                                    boxes that already have their own install
 #   BB_NM_PORT=4000                  NoMachine NX port
 #   BB_NM_INSTALLER                  local .dmg/.pkg to install from (thumb
 #                                    drive); otherwise downloaded from nomachine.com
@@ -83,6 +85,7 @@ NM_MAC_DOWNLOAD_PAGE="https://download.nomachine.com/download/?id=117&platform=m
 BB_NM_PORT="${BB_NM_PORT:-4000}"
 NM_READY=0
 NM_TCC_MISSING=""
+NM_CHANGED=0
 
 DONE_STEPS=()
 SKIPPED_STEPS=()
@@ -152,6 +155,10 @@ fi
 # and starts NoMachine, then reports which permissions are still outstanding.
 # Grant them over Screen Sharing, THEN re-run with BB_DISABLE_SCREENSHARING=1.
 
+if [ "${BB_NOMACHINE:-1}" != "1" ]; then
+    skip_step "NoMachine step skipped (BB_NOMACHINE=0) - leaving the existing install untouched"
+else
+
 # nxserver lives inside the app bundle on macOS; /etc/NX is the documented
 # symlink and older builds used /usr/NX. Take whichever exists.
 nm_bin() {
@@ -190,6 +197,7 @@ nm_set_cfg() {
     fi
     sed -i '' -E "/^[[:space:]]*${key}[[:space:]]/d" "$NM_CFG"
     printf '%s %s\n' "$key" "$val" >> "$NM_CFG"
+    NM_CHANGED=1
     done_step "server.cfg: set $key $val"
 }
 
@@ -208,7 +216,7 @@ nm_resolve_url() {
 }
 
 if nm_bin >/dev/null; then
-    skip_step "NoMachine already installed ($("$(nm_bin)" --version 2>/dev/null | head -1 | tr -d '\n'))"
+    skip_step "NoMachine already installed ($("$(nm_bin)" --version 2>/dev/null | grep -i version | head -1 | tr -d '\n' || true))"
 else
     NM_SRC="${BB_NM_INSTALLER:-}"
     NM_TMP=""
@@ -255,6 +263,7 @@ else
     esac
     if [ -n "$NM_TMP" ]; then rm -rf "$NM_TMP"; fi
     nm_bin >/dev/null || die "NoMachine installed but no nxserver binary found under $NM_APP"
+    NM_CHANGED=1
     done_step "Installed NoMachine"
 fi
 
@@ -298,10 +307,26 @@ else
     skip_step "Application firewall: no NoMachine binary to allow"
 fi
 
-if "$NXSERVER" --restart >>"$LOG_FILE" 2>&1 || "$NXSERVER" --startup >>"$LOG_FILE" 2>&1; then
-    done_step "Started NoMachine server"
+# Restarting nxserver drops every live NoMachine session - including the one
+# you are probably running this from. Only do it when this run actually changed
+# something, or when the server is not answering at all.
+NM_WAS_UP=0
+if nc -z -w 3 localhost "$BB_NM_PORT" >/dev/null 2>&1; then NM_WAS_UP=1; fi
+
+if [ "$NM_CHANGED" -eq 1 ]; then
+    if "$NXSERVER" --restart >>"$LOG_FILE" 2>&1 || "$NXSERVER" --startup >>"$LOG_FILE" 2>&1; then
+        done_step "Restarted NoMachine server (this run changed its config)"
+    else
+        log "WARNING: could not restart nxserver - see $LOG_FILE"
+    fi
+elif [ "$NM_WAS_UP" -eq 1 ]; then
+    skip_step "NoMachine already running as configured - not restarting (that would drop your session)"
 else
-    log "WARNING: could not start nxserver - see $LOG_FILE"
+    if "$NXSERVER" --startup >>"$LOG_FILE" 2>&1; then
+        done_step "Started NoMachine server"
+    else
+        log "WARNING: could not start nxserver - see $LOG_FILE"
+    fi
 fi
 
 sleep 3
@@ -325,6 +350,8 @@ else
     NM_READY=0
     NM_TCC_MISSING=" (unknown - no Full Disk Access to read TCC.db)"
     skip_step "NoMachine permission check: needs Full Disk Access"
+fi
+
 fi
 
 # ── 2. Screen Sharing (fallback / recovery path) ────────────────────────────
@@ -528,7 +555,9 @@ for s in ${SKIPPED_STEPS[@]+"${SKIPPED_STEPS[@]}"}; do log "  - $s"; done
 log "Log: $LOG_FILE"
 
 log "=== Remote GUI ==="
-if [ "$NM_READY" -eq 1 ]; then
+if [ "${BB_NOMACHINE:-1}" != "1" ]; then
+    log "NoMachine step was skipped (BB_NOMACHINE=0). Existing install left alone."
+elif [ "$NM_READY" -eq 1 ]; then
     log "NoMachine ready on port $BB_NM_PORT. Connect to nx://<tailscale-name>:$BB_NM_PORT"
     if [ "${BB_DISABLE_SCREENSHARING:-0}" != "1" ]; then
         log "Screen Sharing is still on as fallback. Once you have logged in over"

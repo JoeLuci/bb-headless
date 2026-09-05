@@ -19,6 +19,10 @@
 #   curl -fsSL <url> | sudo BB_DISABLE_SCREENSHARING=1 bash
 #   curl -fsSL <url> | sudo BB_NM_LICENSE=/Volumes/DRIVE/server.lic bash
 #
+# On a Mac that already has its own NoMachine - the VMs - skip that step so the
+# existing install and its live sessions are left alone:
+#   curl -fsSL <url> | sudo BB_NOMACHINE=0 bash
+#
 # Prerequisites, in this order, or the run is wasted:
 #   1. Each user login already set up in the BlueBubbles Electron app
 #      (its config.db must exist) - logins without one are skipped.
