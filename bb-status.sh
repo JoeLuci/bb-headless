@@ -83,12 +83,27 @@ fi
 
 nc -z -w 2 localhost 22 >/dev/null 2>&1 && ok "SSH listening on 22" || bad "SSH not listening"
 
-head_ "Removed systems"
-if pgrep -x tailscaled >/dev/null 2>&1 || [ -f /Library/LaunchDaemons/com.tailscale.tailscaled.plist ]; then
-    warn "Tailscale still present - run uninstall-tailscale.sh"
+head_ "How to reach this Mac"
+IFACE="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+LAN_IP="$(ipconfig getifaddr "$IFACE" 2>/dev/null)"
+echo "  On this LAN:  ${LAN_IP:-?}:${BB_NM_PORT:-4000}   or   $(scutil --get LocalHostName 2>/dev/null).local:${BB_NM_PORT:-4000}"
+
+TS=""
+for c in /usr/local/bin/tailscale /opt/homebrew/bin/tailscale; do
+    if [ -x "$c" ]; then TS="$c"; break; fi
+done
+if [ -n "$TS" ]; then
+    TS_IP="$("$TS" ip -4 2>/dev/null | head -1)"
+    if [ -n "$TS_IP" ]; then
+        ok "From anywhere:  $TS_IP:${BB_NM_PORT:-4000}  (Tailscale) - put this in NoMachine"
+    else
+        bad "Tailscale installed but not joined - run: sudo $TS up --ssh, then approve the URL"
+    fi
 else
-    ok "Tailscale gone"
+    warn "No Tailscale - this Mac is reachable on the LAN ONLY. Fine for a VM with its own public address; on a mini it means no access while travelling."
 fi
+
+head_ "Old systems"
 if [ -d /usr/local/lib/bb-autologin ] || [ -f /Library/LaunchDaemons/com.local.bb-autologin.plist ]; then
     warn "bb-autologin still present - run uninstall-autologin.sh"
 else

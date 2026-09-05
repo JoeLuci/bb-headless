@@ -9,7 +9,8 @@
 #   install.sh          - headless BlueBubbles for every user with a config.db
 #   bb-metrics.sh       - hourly health logger
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
-#                         and removal of Tailscale
+#                         and Tailscale (the address that makes NoMachine
+#                         reachable from outside the LAN)
 # then installs the `bb-switch` and `bb-status` shortcuts, opens the two Privacy
 # panes, and prints a per-user check of what actually took (`sudo bb-status`).
 #
@@ -21,9 +22,12 @@
 #   curl -fsSL <url> | sudo BB_DISABLE_SCREENSHARING=1 bash
 #   curl -fsSL <url> | sudo BB_NM_LICENSE=/Volumes/DRIVE/server.lic bash
 #
-# On a Mac that already has its own NoMachine - the VMs - skip that step so the
-# existing install and its live sessions are left alone:
-#   curl -fsSL <url> | sudo BB_NOMACHINE=0 bash
+# For the VM Macs, which already have their own NoMachine and must not get
+# Tailscale, one flag covers both:
+#   curl -fsSL <url> | sudo BB_VM=1 bash
+# It is shorthand for BB_NOMACHINE=0 BB_TAILSCALE=0 - neither is installed, and
+# nothing already on the box is touched or removed. Set either explicitly to
+# override.
 #
 # Prerequisites, in this order, or the run is wasted:
 #   1. Each user login already set up in the BlueBubbles Electron app
@@ -43,6 +47,14 @@ command -v git >/dev/null 2>&1 || {
 }
 
 CONSOLE_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
+
+# VM Macs: they already have NoMachine, and they must not get Tailscale.
+# 0 means "leave alone" for both - nothing is installed and nothing removed.
+if [ "${BB_VM:-0}" = "1" ]; then
+    export BB_NOMACHINE="${BB_NOMACHINE:-0}"
+    export BB_TAILSCALE="${BB_TAILSCALE:-0}"
+    echo "BB_VM=1: NoMachine and Tailscale steps disabled (nothing installed, nothing removed)"
+fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 

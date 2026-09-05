@@ -15,10 +15,12 @@
 #   3. Hardens SSH with a drop-in in /etc/ssh/sshd_config.d/ - key auth only,
 #      no root login, AllowUsers scoped to BB_ADMIN_USER. Installs the admin
 #      public key from $BB_ADMIN_PUBKEY.
-#   4. Removes Tailscale (daemon, keg, state, tailnet registration) - it is no
-#      longer part of this setup. Set BB_TAILSCALE=1 to install and join a
-#      tailnet instead, as this script used to. Removal runs at the very end,
-#      after everything else, because it drops a tailnet SSH session.
+#   4. Installs Tailscale and joins the tailnet. This is what gives each Mac a
+#      stable address reachable from outside the LAN - the minis sit on private
+#      RFC-1918 addresses, so NoMachine has nothing to dial from the road
+#      without it. You still connect with NoMachine; Tailscale is only the
+#      address. BB_TAILSCALE=0 leaves it alone; BB_TAILSCALE=remove uninstalls
+#      it, at the very end, because removal drops a tailnet SSH session.
 #   5. Enables the application firewall, disables automatic login, requires
 #      password immediately on wake.
 #   6. pmset: never sleep, autorestart after power failure.
@@ -30,9 +32,11 @@
 # Config via env (defaults shown):
 #   BB_ADMIN_USER=m01                admin account for SSH + brew
 #   BB_SCREENSHARING_USERS="m01"     space-separated allowlist
-#   BB_TAILSCALE=0                   1 = install Tailscale instead of removing it
-#   TS_AUTHKEY                       only used when BB_TAILSCALE=1 and it is not
-#                                    up yet; without it you get a login URL
+#   BB_TAILSCALE=1                   1 = install and join the tailnet
+#                                    0 = leave Tailscale alone entirely
+#                                    remove = uninstall it
+#   TS_AUTHKEY                       only used when Tailscale is not up yet;
+#                                    without it you get a login URL to approve
 #   BB_ADMIN_PUBKEY                  defaults to Joe's laptop key (public, safe
 #                                    in the repo); override to use another key
 #   BB_NOMACHINE=1                   0 = skip the NoMachine step entirely, for
@@ -474,10 +478,10 @@ else
 fi
 
 # ── 4. Tailscale (Homebrew standalone, not App Store) ───────────────────────
-# Not part of the setup any more - see the removal block at the end of the
-# script. BB_TAILSCALE=1 restores the old install-and-join behaviour.
-if [ "${BB_TAILSCALE:-0}" != "1" ]; then
-    skip_step "Tailscale install (BB_TAILSCALE=1 to enable; removal runs at the end)"
+# The address layer. NoMachine is the thing you actually use; this just makes
+# the Mac reachable from outside the LAN.
+if [ "${BB_TAILSCALE:-1}" != "1" ]; then
+    skip_step "Tailscale install skipped (BB_TAILSCALE=${BB_TAILSCALE:-1})"
 else
 
 [ -x "$BREW" ] || die "Homebrew not found at $BREW"
@@ -575,12 +579,12 @@ fi
 # ── Tailscale removal (last, on purpose) ──────────────────────────────────
 # Dead last because it kills a tailnet SSH session - everything above has
 # already run and been logged by the time this fires.
-if [ "${BB_TAILSCALE:-0}" != "1" ]; then
+if [ "${BB_TAILSCALE:-1}" = "remove" ]; then
     if [ -x "$TS_BIN" ] || [ -x /usr/local/bin/tailscaled ] \
         || [ -f /Library/LaunchDaemons/com.tailscale.tailscaled.plist ]; then
         TS_UNINSTALL="$(cd "$(dirname "$0")" && pwd)/uninstall-tailscale.sh"
         if [ -f "$TS_UNINSTALL" ]; then
-            log "=== Removing Tailscale (BB_TAILSCALE=1 to keep it) ==="
+            log "=== Removing Tailscale (BB_TAILSCALE=remove was set) ==="
             log "If you are connected over the tailnet, this is where you get dropped."
             bash "$TS_UNINSTALL" 2>&1 | tee -a "$LOG_FILE"
         else

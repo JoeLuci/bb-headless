@@ -5,6 +5,9 @@
 #   1. Copy this whole repo folder onto the drive
 #   2. Create secrets.env next to this script (never committed - gitignored):
 #        BB_ADMIN_PUBKEY="ssh-ed25519 AAAA... joe"
+#        TS_AUTHKEY=tskey-auth-...      (optional - without it, Tailscale
+#                                        prints a login URL to approve on your
+#                                        phone instead)
 #      Optional, for NoMachine (remote GUI) - keep the package and licence on
 #      the drive so the Macs never have to reach nomachine.com:
 #        BB_NM_INSTALLER="/Volumes/<DRIVE>/bb-headless/nomachine.dmg"
@@ -53,7 +56,7 @@ bash "$DEST/install.sh"
 echo "== bb-metrics install =="
 bash "$DEST/bb-metrics.sh" install
 
-# Also removes Tailscale if it is still on the box (BB_TAILSCALE=1 keeps it).
+# Installs Tailscale so the Mac is reachable from outside the LAN.
 echo "== bb-remote-admin =="
 bash "$DEST/bb-remote-admin.sh"
 
