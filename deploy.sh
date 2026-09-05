@@ -4,8 +4,11 @@
 # Make the drive once:
 #   1. Copy this whole repo folder onto the drive
 #   2. Create secrets.env next to this script (never committed - gitignored):
-#        TS_AUTHKEY=tskey-auth-...
 #        BB_ADMIN_PUBKEY="ssh-ed25519 AAAA... joe"
+#      Optional, for NoMachine (remote GUI) - keep the package and licence on
+#      the drive so the Macs never have to reach nomachine.com:
+#        BB_NM_INSTALLER="/Volumes/<DRIVE>/bb-headless/nomachine.dmg"
+#        BB_NM_LICENSE="/Volumes/<DRIVE>/bb-headless/server.lic"
 #
 # On each Mac:
 #   sudo bash "/Volumes/<DRIVE NAME>/bb-headless/deploy.sh"
@@ -15,8 +18,10 @@
 #      (secrets.env stays on the drive, never lands on the Mac)
 #   2. install.sh          - install/update headless BB for every configured user
 #   3. bb-metrics.sh       - install the hourly health logger
-#   4. bb-remote-admin.sh  - remote admin (skipped with a warning if secrets.env
-#                            is missing; everything else still runs)
+#   4. bb-remote-admin.sh  - remote admin: NoMachine (remote GUI) + SSH +
+#                            Tailscale + lockdown. Screen Sharing stays on as
+#                            the fallback until you re-run with
+#                            BB_DISABLE_SCREENSHARING=1.
 #
 # Idempotent - same command updates an already-configured Mac.
 
@@ -48,8 +53,7 @@ bash "$DEST/install.sh"
 echo "== bb-metrics install =="
 bash "$DEST/bb-metrics.sh" install
 
-# No secrets required: without TS_AUTHKEY, the Tailscale step prints a login
-# URL - open it on a signed-in phone and tap Approve.
+# Also removes Tailscale if it is still on the box (BB_TAILSCALE=1 keeps it).
 echo "== bb-remote-admin =="
 bash "$DEST/bb-remote-admin.sh"
 

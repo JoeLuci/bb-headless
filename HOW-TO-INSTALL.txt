@@ -1,16 +1,38 @@
-BB-HEADLESS: NEW MAC SETUP
-==========================
+BB-HEADLESS: MAC SETUP
+======================
 
-Do this ONCE from any user (e.g. m01). This builds the headless server.
+TWO STEPS. Works on a brand-new Mac and on one that already has bb-headless.
 
-1. Open Terminal
+BEFORE YOU START
+  - Every user login must already be set up in the BlueBubbles Electron app
+    (logins without a config are skipped).
+  - Give Terminal Full Disk Access:
+    System Settings > Privacy & Security > Full Disk Access > Terminal
 
-2. Run these 3 commands:
+STEP 1 - ONCE PER MAC, from any admin login. Paste into Terminal:
 
-   git clone https://github.com/JoeLuci/bb-headless.git /Users/Shared/bb-headless
-   cd /Users/Shared/bb-headless
-   sudo bash install.sh --build-only
+    curl -fsSL https://raw.githubusercontent.com/JoeLuci/bb-headless/main/setup.sh | sudo bash
 
-3. Wait 3-5 minutes. When you see "Build complete" you're done.
+  Takes 3-5 minutes on a new Mac.
 
-4. Now follow HOW-TO-SWITCH-USER.txt for each user on this Mac.
+STEP 2 - ONCE PER USER. Fast User Switch into each account, open Terminal:
+
+    bb-switch
+
+  Ten seconds each. If it fails it puts that user back on Electron by itself.
+  (Long form, same thing: bash /Users/Shared/bb-headless/switch-user.sh)
+  NEVER run it with sudo.
+
+STEP 3 - TWO CLICKS macOS will not let a script do
+  Two Privacy panes open at the end of Step 1. Tick NoMachine in BOTH:
+    Screen & System Audio Recording
+    Accessibility
+  Then restart the Mac and log all five accounts back in.
+
+CHECK IT WORKED
+  for u in m01 m02 m03 m04 m05; do pgrep -u $u -f "node.*headless" >/dev/null && echo "$u ok" || echo "$u DOWN"; done
+
+IF SOMETHING LOOKS WRONG
+  /var/log/bb-headless-install.log
+  /var/log/bb-remote-admin.log
+  ~/Library/Logs/bb-headless.log      (from the user that failed)
