@@ -10,7 +10,8 @@
 #   bb-metrics.sh       - hourly health logger
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
 #                         and removal of Tailscale
-# then installs the `bb-switch` shortcut and opens the two Privacy panes.
+# then installs the `bb-switch` and `bb-status` shortcuts, opens the two Privacy
+# panes, and prints a per-user check of what actually took (`sudo bb-status`).
 #
 # This is the once-per-Mac half. Each user login still needs `bb-switch` run
 # from inside it - cross-user LaunchAgent bootstrapping was tried and dropped
@@ -60,7 +61,9 @@ echo "At $(git -C "$REPO_DIR" log --oneline -1)"
 chmod -R a+rX "$REPO_DIR"
 
 step "uninstall-autologin.sh (remove the old bb-autologin system)"
-bash "$REPO_DIR/uninstall-autologin.sh"
+# Never a stopper: this is cleanup of a dead system, and failing it must not
+# cost you the actual install below.
+bash "$REPO_DIR/uninstall-autologin.sh" || echo "WARNING: bb-autologin cleanup failed - carrying on, run it by hand later"
 
 step "install.sh (headless BlueBubbles)"
 bash "$REPO_DIR/install.sh"
@@ -75,8 +78,9 @@ bash "$REPO_DIR/bb-remote-admin.sh"
 # switch-user.sh uses absolute paths throughout, so a symlink is safe.
 mkdir -p /usr/local/bin
 ln -sf "$REPO_DIR/switch-user.sh" /usr/local/bin/bb-switch
-chmod +x "$REPO_DIR/switch-user.sh"
-echo "Installed 'bb-switch' -> $REPO_DIR/switch-user.sh"
+ln -sf "$REPO_DIR/bb-status.sh"   /usr/local/bin/bb-status
+chmod +x "$REPO_DIR/switch-user.sh" "$REPO_DIR/bb-status.sh"
+echo "Installed 'bb-switch' and 'bb-status'"
 
 step "What is left to do by hand"
 cat <<'TXT'
@@ -100,7 +104,8 @@ for pane in Privacy_ScreenCapture Privacy_Accessibility; do
     sleep 1
 done
 
+step "Checking what actually took"
+bash "$REPO_DIR/bb-status.sh" || true
 echo ""
-echo "Verify BlueBubbles:"
-echo '  for u in m01 m02 m03 m04 m05; do pgrep -u $u -f "node.*headless" >/dev/null && echo "$u ok" || echo "$u DOWN"; done'
-echo "Logs: /var/log/bb-headless-install.log  /var/log/bb-remote-admin.log"
+echo "Re-run this check any time with:  sudo bb-status"
+
