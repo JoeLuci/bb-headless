@@ -5,6 +5,7 @@
 #
 # Same command whether the Mac is brand new or already running bb-headless:
 # it clones or updates /Users/Shared/bb-headless, then runs
+#   uninstall-autologin - removes the old bb-autologin system if it is present
 #   install.sh          - headless BlueBubbles for every user with a config.db
 #   bb-metrics.sh       - hourly health logger
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
@@ -57,6 +58,9 @@ rm -rf "$REPO_DIR"
 mv "$REPO_DIR.new" "$REPO_DIR"
 echo "At $(git -C "$REPO_DIR" log --oneline -1)"
 chmod -R a+rX "$REPO_DIR"
+
+step "uninstall-autologin.sh (remove the old bb-autologin system)"
+bash "$REPO_DIR/uninstall-autologin.sh"
 
 step "install.sh (headless BlueBubbles)"
 bash "$REPO_DIR/install.sh"
