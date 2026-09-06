@@ -21,8 +21,9 @@
 # Options are env vars, passed through to the scripts below, e.g.
 #   curl -fsSL <url> | sudo BB_DISABLE_SCREENSHARING=1 bash
 #   curl -fsSL <url> | sudo BB_NM_LICENSE=/Volumes/DRIVE/server.lic bash
-# or skip the flag entirely: put each Mac's key on the drive as
-# bb-licenses/<hostname>.tar.gz and it is picked up by name - see below.
+# or skip the flag: download the key on the Mac itself (~/Downloads/key.tar.gz),
+# or keep all keys in a private repo and pass BB_LICENSE_REPO=owner/repo - see
+# the lookup below for every place it looks.
 #
 # For the VM Macs, which already have their own NoMachine and must not get
 # Tailscale, one flag covers both:
@@ -86,24 +87,54 @@ step "bb-metrics.sh (health logger)"
 bash "$REPO_DIR/bb-metrics.sh" install
 
 # NoMachine subscription keys are one-per-Mac and must not live in this public
-# repo. If BB_NM_LICENSE is not given, look for a key named after this Mac on
-# any plugged-in drive, then in /Users/Shared/bb-licenses. Name the file after
-# the hostname exactly as `scutil --get LocalHostName` prints it:
-#   bb-licenses/Viato-Phone-MM-AZ-08.tar.gz    (the key.tar.gz NoMachine issues)
-#   bb-licenses/Viato-Phone-MM-AZ-08.lic       (a bare server.lic also works)
+# repo. If BB_NM_LICENSE is not given, find this Mac's key, in this order:
+#   1. bb-licenses/<hostname>.tar.gz|.lic on any mounted drive
+#   2. /Users/Shared/bb-licenses/<hostname>.tar.gz|.lic on this Mac
+#   3. a PRIVATE GitHub repo: BB_LICENSE_REPO=owner/repo holding
+#      <hostname>.tar.gz at its root, fetched with `gh` if it is logged in,
+#      else with BB_LICENSE_TOKEN (a read-only fine-grained token)
+#   4. the newest key*.tar.gz in the invoking user's ~/Downloads - i.e. you
+#      downloaded it from your NoMachine User Area on this Mac just now
+# <hostname> is exactly what `scutil --get LocalHostName` prints.
 if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-1}" = "1" ]; then
     HOSTN="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    LIC_TMP="$(mktemp -d)"
+
     for dir in /Volumes/*/bb-licenses /Users/Shared/bb-licenses; do
         [ -d "$dir" ] || continue
         for f in "$dir/$HOSTN.tar.gz" "$dir/$HOSTN.tgz" "$dir/$HOSTN.lic"; do
             if [ -f "$f" ]; then export BB_NM_LICENSE="$f"; break 2; fi
         done
     done
+
+    if [ -z "${BB_NM_LICENSE:-}" ] && [ -n "${BB_LICENSE_REPO:-}" ]; then
+        out="$LIC_TMP/$HOSTN.tar.gz"
+        if command -v gh >/dev/null 2>&1 && sudo -u "$CONSOLE_USER" -H gh auth status >/dev/null 2>&1; then
+            sudo -u "$CONSOLE_USER" -H gh api "repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" \
+                -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null || rm -f "$out"
+        elif [ -n "${BB_LICENSE_TOKEN:-}" ]; then
+            curl -fsSL -H "Authorization: token $BB_LICENSE_TOKEN" \
+                "https://raw.githubusercontent.com/$BB_LICENSE_REPO/main/$HOSTN.tar.gz" -o "$out" 2>/dev/null || rm -f "$out"
+        fi
+        if [ -s "$out" ]; then export BB_NM_LICENSE="$out"; echo "Fetched NoMachine key from $BB_LICENSE_REPO"; fi
+    fi
+
+    if [ -z "${BB_NM_LICENSE:-}" ]; then
+        DL="$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')/Downloads"
+        newest="$(ls -t "$DL"/key*.tar.gz 2>/dev/null | head -1 || true)"
+        if [ -n "$newest" ]; then
+            export BB_NM_LICENSE="$newest"
+            echo "Using the NoMachine key you downloaded: $newest"
+            echo "(each key licenses ONE Mac - make sure this is the one you generated for $HOSTN)"
+        fi
+    fi
+
     if [ -n "${BB_NM_LICENSE:-}" ]; then
         echo "NoMachine key for $HOSTN: $BB_NM_LICENSE"
     else
-        echo "No NoMachine key found for $HOSTN (looked in /Volumes/*/bb-licenses and /Users/Shared/bb-licenses)."
-        echo "Without one the server refuses connections. Add bb-licenses/$HOSTN.tar.gz to the drive and re-run."
+        echo "No NoMachine key found for $HOSTN. Without one the server refuses connections."
+        echo "Easiest: on this Mac, download the key from your NoMachine User Area (it lands in"
+        echo "~/Downloads/key.tar.gz) and re-run this command. Or set BB_LICENSE_REPO=owner/private-repo."
     fi
 fi
 
