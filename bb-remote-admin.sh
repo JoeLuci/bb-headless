@@ -41,6 +41,10 @@
 #                                    in the repo); override to use another key
 #   BB_NOMACHINE=1                   0 = skip the NoMachine step entirely, for
 #                                    boxes that already have their own install
+#   BB_NM_PRODUCT=enterprise-desktop which package to install (or personal-edition)
+#   BB_NM_REINSTALL=0                1 = uninstall whatever NoMachine is there and
+#                                    install BB_NM_PRODUCT fresh (fixes a PE
+#                                    install that refuses an Enterprise key)
 #   BB_NM_PORT=4000                  NoMachine NX port
 #   BB_NM_INSTALLER                  local .dmg/.pkg to install from (thumb
 #                                    drive); otherwise downloaded from nomachine.com
@@ -85,7 +89,18 @@ TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
 NM_APP="/Applications/NoMachine.app"
 NM_ETC="$NM_APP/Contents/Frameworks/etc"
 NM_CFG="$NM_ETC/server.cfg"
-NM_MAC_DOWNLOAD_PAGE="https://download.nomachine.com/download/?id=117&platform=mac"
+# Which product to install. The subscription keys are Enterprise Desktop
+# (server type EDSS) and a Personal Edition install (PE) refuses them outright:
+#   "NX> 650 ERROR: The installed server type PE is not suitable for the
+#    subscription type EDSS."
+# Both packages are public downloads; only the licence differs.
+BB_NM_PRODUCT="${BB_NM_PRODUCT:-enterprise-desktop}"
+case "$BB_NM_PRODUCT" in
+    enterprise-desktop) NM_MAC_DOWNLOAD_PAGE="https://download.nomachine.com/download/?id=37&platform=mac" ;;
+    personal-edition)   NM_MAC_DOWNLOAD_PAGE="https://download.nomachine.com/download/?id=117&platform=mac" ;;
+    *) echo "ERROR: BB_NM_PRODUCT must be enterprise-desktop or personal-edition"; exit 1 ;;
+esac
+NM_UNINSTALL="/Library/Application Support/NoMachine/nxuninstall.sh"
 BB_NM_PORT="${BB_NM_PORT:-4000}"
 NM_READY=0
 NM_TCC_MISSING=""
@@ -219,9 +234,7 @@ nm_resolve_url() {
     return 1
 }
 
-if nm_bin >/dev/null; then
-    skip_step "NoMachine already installed ($("$(nm_bin)" --version 2>/dev/null | grep -i version | head -1 | tr -d '\n' || true))"
-else
+nm_install() {
     NM_SRC="${BB_NM_INSTALLER:-}"
     NM_TMP=""
     if [ -n "$NM_SRC" ]; then
@@ -268,7 +281,26 @@ else
     if [ -n "$NM_TMP" ]; then rm -rf "$NM_TMP"; fi
     nm_bin >/dev/null || die "NoMachine installed but no nxserver binary found under $NM_APP"
     NM_CHANGED=1
-    done_step "Installed NoMachine"
+    done_step "Installed NoMachine ($BB_NM_PRODUCT)"
+}
+
+# The wrong product installed is worse than none: it holds the port and
+# refuses the key. BB_NM_REINSTALL=1 tears it out and installs BB_NM_PRODUCT.
+if nm_bin >/dev/null && [ "${BB_NM_REINSTALL:-0}" = "1" ]; then
+    if [ -x "$NM_UNINSTALL" ]; then
+        "$NM_UNINSTALL" >>"$LOG_FILE" 2>&1 || log "WARNING: nxuninstall.sh returned non-zero - continuing"
+    else
+        rm -rf "$NM_APP"
+    fi
+    sleep 2
+    if nm_bin >/dev/null; then die "NoMachine still present after uninstall - remove $NM_APP by hand and re-run"; fi
+    done_step "Uninstalled the previous NoMachine (BB_NM_REINSTALL=1)"
+fi
+
+if nm_bin >/dev/null; then
+    skip_step "NoMachine already installed ($("$(nm_bin)" --version 2>/dev/null | grep -i version | head -1 | tr -d '\n' || true))"
+else
+    nm_install
 fi
 
 NXSERVER="$(nm_bin)"
@@ -300,7 +332,12 @@ if [ -n "${BB_NM_LICENSE:-}" ]; then
         esac
         [ -n "$LIC_FILES" ] || die "No .lic file found in $BB_NM_LICENSE"
         for f in $LIC_FILES; do
-            nm_set_licence "$f" || die "nxserver could not deploy $(basename "$f") - see $LOG_FILE"
+            if ! nm_set_licence "$f"; then
+                if grep -q "not suitable for the subscription type" "$LOG_FILE"; then
+                    die "The installed NoMachine product does not match this key ($(grep -o 'server type [A-Z]* is not suitable for the subscription type [A-Z]*' "$LOG_FILE" | tail -1)). Re-run with BB_NM_REINSTALL=1 to replace it with $BB_NM_PRODUCT."
+                fi
+                die "nxserver could not deploy $(basename "$f") - see $LOG_FILE"
+            fi
         done
         if [ -n "$NM_LIC_TMP" ]; then rm -rf "$NM_LIC_TMP"; fi
         NM_CHANGED=1
