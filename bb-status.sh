@@ -56,6 +56,12 @@ head_ "Remote access"
 NX="/Applications/NoMachine.app/Contents/Frameworks/bin/nxserver"
 if [ -x "$NX" ]; then
     ok "NoMachine installed ($("$NX" --version 2>/dev/null | grep -i version | head -1 || echo version unknown))"
+    SUB="$("$NX" --subscriptioninfo 2>&1)"
+    if printf '%s' "$SUB" | grep -q "No subscription found"; then
+        bad "NoMachine has NO subscription - it refuses every connection. Deploy this Mac's key.tar.gz"
+    else
+        ok "NoMachine subscription: $(printf '%s' "$SUB" | grep -vi warning | head -1)"
+    fi
     if nc -z -w 2 localhost "${BB_NM_PORT:-4000}" >/dev/null 2>&1; then
         ok "NoMachine listening on ${BB_NM_PORT:-4000}"
     else

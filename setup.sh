@@ -21,6 +21,8 @@
 # Options are env vars, passed through to the scripts below, e.g.
 #   curl -fsSL <url> | sudo BB_DISABLE_SCREENSHARING=1 bash
 #   curl -fsSL <url> | sudo BB_NM_LICENSE=/Volumes/DRIVE/server.lic bash
+# or skip the flag entirely: put each Mac's key on the drive as
+# bb-licenses/<hostname>.tar.gz and it is picked up by name - see below.
 #
 # For the VM Macs, which already have their own NoMachine and must not get
 # Tailscale, one flag covers both:
@@ -82,6 +84,28 @@ bash "$REPO_DIR/install.sh"
 
 step "bb-metrics.sh (health logger)"
 bash "$REPO_DIR/bb-metrics.sh" install
+
+# NoMachine subscription keys are one-per-Mac and must not live in this public
+# repo. If BB_NM_LICENSE is not given, look for a key named after this Mac on
+# any plugged-in drive, then in /Users/Shared/bb-licenses. Name the file after
+# the hostname exactly as `scutil --get LocalHostName` prints it:
+#   bb-licenses/Viato-Phone-MM-AZ-08.tar.gz    (the key.tar.gz NoMachine issues)
+#   bb-licenses/Viato-Phone-MM-AZ-08.lic       (a bare server.lic also works)
+if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-1}" = "1" ]; then
+    HOSTN="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    for dir in /Volumes/*/bb-licenses /Users/Shared/bb-licenses; do
+        [ -d "$dir" ] || continue
+        for f in "$dir/$HOSTN.tar.gz" "$dir/$HOSTN.tgz" "$dir/$HOSTN.lic"; do
+            if [ -f "$f" ]; then export BB_NM_LICENSE="$f"; break 2; fi
+        done
+    done
+    if [ -n "${BB_NM_LICENSE:-}" ]; then
+        echo "NoMachine key for $HOSTN: $BB_NM_LICENSE"
+    else
+        echo "No NoMachine key found for $HOSTN (looked in /Volumes/*/bb-licenses and /Users/Shared/bb-licenses)."
+        echo "Without one the server refuses connections. Add bb-licenses/$HOSTN.tar.gz to the drive and re-run."
+    fi
+fi
 
 step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
 bash "$REPO_DIR/bb-remote-admin.sh"
