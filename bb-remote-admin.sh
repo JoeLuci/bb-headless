@@ -287,13 +287,33 @@ nm_install() {
 # The wrong product installed is worse than none: it holds the port and
 # refuses the key. BB_NM_REINSTALL=1 tears it out and installs BB_NM_PRODUCT.
 if nm_bin >/dev/null && [ "${BB_NM_REINSTALL:-0}" = "1" ]; then
+    # NoMachine's own uninstaller hands the real work to a launchd job and
+    # returns immediately, so the bundle can still be there seconds later.
+    # Give it a minute, then finish the job ourselves: stop every NoMachine
+    # launchd job, remove the bundle, support dir and receipts.
     if [ -x "$NM_UNINSTALL" ]; then
         "$NM_UNINSTALL" >>"$LOG_FILE" 2>&1 || log "WARNING: nxuninstall.sh returned non-zero - continuing"
-    else
-        rm -rf "$NM_APP"
     fi
-    sleep 2
-    if nm_bin >/dev/null; then die "NoMachine still present after uninstall - remove $NM_APP by hand and re-run"; fi
+    for _ in $(seq 1 30); do
+        nm_bin >/dev/null 2>&1 || break
+        sleep 2
+    done
+    if nm_bin >/dev/null 2>&1; then
+        log "nxuninstall.sh did not finish - removing the rest by hand"
+        for job in com.nomachine.localnxserver com.nomachine.nxlaunchconf com.nomachine.nxnode \
+                   com.nomachine.nxplayer com.nomachine.nxrunner com.nomachine.nxserver \
+                   com.nomachine.server com.nomachine.uninstall com.nomachine.uninstallAgent; do
+            launchctl bootout "system/$job" 2>/dev/null || true
+            rm -f "/Library/LaunchDaemons/$job.plist" "/Library/LaunchAgents/$job.plist"
+        done
+        pkill -f "NoMachine.app" 2>/dev/null || true
+        pkill -x nxd 2>/dev/null || true
+        pkill -f "nxserver" 2>/dev/null || true
+        sleep 2
+        rm -rf "$NM_APP" "/Library/Application Support/NoMachine" /etc/NX
+        for r in $(pkgutil --pkgs 2>/dev/null | grep -i nomachine); do pkgutil --forget "$r" >/dev/null 2>&1 || true; done
+    fi
+    if nm_bin >/dev/null 2>&1; then die "NoMachine still present after uninstall - remove $NM_APP by hand and re-run"; fi
     done_step "Uninstalled the previous NoMachine (BB_NM_REINSTALL=1)"
 fi
 
