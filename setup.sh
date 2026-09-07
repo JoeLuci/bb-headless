@@ -43,6 +43,9 @@ set -euo pipefail
 REPO_URL="https://github.com/JoeLuci/bb-headless.git"
 REPO_DIR="/Users/Shared/bb-headless"
 BRANCH="${BB_BRANCH:-main}"
+# Private repo holding one NoMachine key per Mac, named <hostname>.tar.gz.
+# The name is not a secret; access is via gh login or BB_LICENSE_TOKEN.
+BB_LICENSE_REPO="${BB_LICENSE_REPO:-JoeLuci/bb-licenses}"
 
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: run with sudo, e.g. curl -fsSL <url> | sudo bash"; exit 1; }
 command -v git >/dev/null 2>&1 || {
@@ -61,6 +64,51 @@ if [ "${BB_VM:-0}" = "1" ]; then
 fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
+
+gh_bin() {
+    local c
+    for c in /opt/homebrew/bin/gh /usr/local/bin/gh; do
+        if [ -x "$c" ]; then printf '%s' "$c"; return 0; fi
+    done
+    return 1
+}
+
+# Pull <hostname>.tar.gz from the private repo into $1. Prefers a gh login
+# on this Mac (as the invoking user), else BB_LICENSE_TOKEN. Returns 1 when
+# neither works or the file is not in the repo.
+fetch_key_from_repo() {
+    local out="$1" GH
+    if GH="$(gh_bin)" && sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1; then
+        sudo -u "$CONSOLE_USER" -H "$GH" api "repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" \
+            -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null || rm -f "$out"
+    elif [ -n "${BB_LICENSE_TOKEN:-}" ]; then
+        curl -fsSL -H "Authorization: token $BB_LICENSE_TOKEN" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" -o "$out" 2>/dev/null || rm -f "$out"
+    fi
+    [ -s "$out" ]
+}
+
+# Make sure gh exists and is logged in for the invoking user. Installs it
+# with Homebrew (present by now - bb-remote-admin.sh installs Homebrew) and
+# runs GitHub's device login: it prints a one-time code and a URL, you enter
+# the code on any browser. Needs a terminal; skipped silently without one.
+ensure_gh_login() {
+    local GH BREW
+    if ! GH="$(gh_bin)"; then
+        for BREW in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$BREW" ] && break; done
+        [ -x "$BREW" ] || return 1
+        sudo -u "$(stat -f %Su "$(dirname "$(dirname "$BREW")")")" -H "$BREW" install gh >/dev/null 2>&1 || return 1
+        GH="$(gh_bin)" || return 1
+    fi
+    if sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1; then return 0; fi
+    [ -t 1 ] && [ -r /dev/tty ] || return 1
+    echo ""
+    echo ">>> One-time GitHub login on this Mac so it can fetch its NoMachine key from $BB_LICENSE_REPO."
+    echo ">>> A code and a URL will appear: open the URL on any device and enter the code."
+    sudo -u "$CONSOLE_USER" -H "$GH" auth login --hostname github.com --git-protocol https --web </dev/tty >/dev/tty 2>&1 || return 1
+    sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1
+}
 
 step "Repo -> $REPO_DIR"
 # Always take a fresh clone rather than updating in place. The existing copy is
@@ -113,14 +161,7 @@ if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-1}" = "1" ]; then
 
     if [ -z "${BB_NM_LICENSE:-}" ] && [ -n "${BB_LICENSE_REPO:-}" ]; then
         out="$LIC_TMP/$HOSTN.tar.gz"
-        if command -v gh >/dev/null 2>&1 && sudo -u "$CONSOLE_USER" -H gh auth status >/dev/null 2>&1; then
-            sudo -u "$CONSOLE_USER" -H gh api "repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" \
-                -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null || rm -f "$out"
-        elif [ -n "${BB_LICENSE_TOKEN:-}" ]; then
-            curl -fsSL -H "Authorization: token $BB_LICENSE_TOKEN" \
-                "https://raw.githubusercontent.com/$BB_LICENSE_REPO/main/$HOSTN.tar.gz" -o "$out" 2>/dev/null || rm -f "$out"
-        fi
-        if [ -s "$out" ]; then export BB_NM_LICENSE="$out"; echo "Fetched NoMachine key from $BB_LICENSE_REPO"; fi
+        fetch_key_from_repo "$out" && export BB_NM_LICENSE="$out" && echo "Fetched NoMachine key from $BB_LICENSE_REPO"
     fi
 
     if [ -z "${BB_NM_LICENSE:-}" ]; then
@@ -144,6 +185,27 @@ fi
 
 step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
 bash "$REPO_DIR/bb-remote-admin.sh"
+
+# The key lookup above runs before Homebrew (and so gh) exists on a fresh
+# Mac. If NoMachine is still unlicensed, try the private repo now that the
+# tools are here, then deploy with a quick second pass.
+NX=/Applications/NoMachine.app/Contents/Frameworks/bin/nxserver
+if [ "${BB_NOMACHINE:-1}" = "1" ] && [ -z "${BB_NM_LICENSE:-}" ] && [ -x "$NX" ] \
+   && "$NX" --subscriptioninfo 2>&1 | grep -q "No subscription found"; then
+    step "NoMachine key from $BB_LICENSE_REPO"
+    out="${LIC_TMP:-$(mktemp -d)}/$HOSTN.tar.gz"
+    if ensure_gh_login && fetch_key_from_repo "$out"; then
+        echo "Fetched $HOSTN.tar.gz - deploying"
+        BB_NM_LICENSE="$out" bash "$REPO_DIR/bb-remote-admin.sh" >/dev/null 2>&1 \
+            && echo "Deployed. NoMachine: $("$NX" --subscriptioninfo 2>&1 | grep -vi warning | head -1)" \
+            || echo "WARNING: deploy failed - see /var/log/bb-remote-admin.log"
+    else
+        echo "No key for this Mac yet. NoMachine will refuse connections until one is deployed."
+        echo "  1. Buy an Enterprise Desktop subscription for this Mac (one per machine)."
+        echo "  2. Upload the emailed key.tar.gz to https://github.com/$BB_LICENSE_REPO as: $HOSTN.tar.gz"
+        echo "  3. Re-run this command. (Or drop key.tar.gz in ~/Downloads on this Mac and re-run.)"
+    fi
+fi
 
 # Short name so the per-user step is one word instead of a pasted path.
 # switch-user.sh uses absolute paths throughout, so a symlink is safe.
