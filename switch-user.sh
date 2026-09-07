@@ -75,6 +75,11 @@ echo "  Server: $SERVER"
 if [ "${BB_KEEP_FINDMY:-0}" != "1" ]; then
     sqlite3 "$CONFIG_DB" "UPDATE config SET value='0' WHERE name='open_findmy_on_startup';" 2>/dev/null \
         && echo "  FindMy-on-startup: disabled"
+    # The flag only stops BB launching FindMy next time; quit one already open.
+    if pgrep -u "$(id -u)" -x FindMy >/dev/null 2>&1; then
+        pkill -x FindMy 2>/dev/null || true
+        echo "  FindMy.app: quit"
+    fi
 fi
 
 # Stop Electron BB. This MUST succeed — Electron holds the same port the

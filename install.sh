@@ -243,6 +243,12 @@ deploy_per_user() {
             sqlite3 "$config_db" "UPDATE config SET value='0' WHERE name='open_findmy_on_startup';" 2>/dev/null \
                 && log "  $user: open_findmy_on_startup=0" \
                 || log "  $user: could not set open_findmy_on_startup (missing key?)"
+            # The flag only stops BB *launching* FindMy next time. One already
+            # open from the Electron days stays resident until quit - so quit it.
+            if pgrep -u "$user" -x FindMy >/dev/null 2>&1; then
+                pkill -u "$user" -x FindMy 2>/dev/null || true
+                log "  $user: quit the running FindMy.app"
+            fi
         fi
 
         # Create LaunchAgent

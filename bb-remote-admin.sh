@@ -570,7 +570,23 @@ if [ "${BB_TAILSCALE:-1}" != "1" ]; then
     skip_step "Tailscale install skipped (BB_TAILSCALE=${BB_TAILSCALE:-1})"
 else
 
-[ -x "$BREW" ] || die "Homebrew not found at $BREW"
+# A fresh mini has no Homebrew. Install it for the invoking admin rather than
+# dying here - everything after this step (lockdown, pmset) would be skipped.
+# Pre-owning the prefix means Homebrew's installer needs no sudo of its own,
+# so it runs clean under NONINTERACTIVE=1 from this root script. It still
+# needs the Xcode Command Line Tools, which setup.sh already requires for git.
+if [ ! -x "$BREW" ]; then
+    BREW_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
+    [ -n "$BREW_USER" ] && [ "$BREW_USER" != "root" ] || die "Homebrew not found and no admin user to install it for - install it by hand: https://brew.sh"
+    log "Homebrew not found - installing it for $BREW_USER (this takes a few minutes)"
+    mkdir -p "$BREW_PREFIX"
+    chown -R "$BREW_USER":admin "$BREW_PREFIX"
+    sudo -u "$BREW_USER" -H env NONINTERACTIVE=1 \
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" >>"$LOG_FILE" 2>&1 \
+        || die "Homebrew install failed - see $LOG_FILE (is Xcode Command Line Tools installed? xcode-select --install)"
+    [ -x "$BREW" ] || die "Homebrew installer finished but $BREW is missing"
+    done_step "Installed Homebrew for $BREW_USER"
+fi
 BREW_OWNER="$(stat -f %Su "$BREW_PREFIX")"
 
 if [ -x "$TS_BIN" ]; then
