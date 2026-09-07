@@ -78,7 +78,7 @@ if [ -x "$NX" ]; then
         esac
     done
 else
-    warn "NoMachine not installed (expected if this Mac was set up with BB_NOMACHINE=0)"
+    ok "NoMachine not installed - this Mac uses Screen Sharing over Tailscale"
 fi
 
 if launchctl print-disabled system 2>/dev/null | grep -q '"com.apple.screensharing" => enabled'; then
@@ -101,7 +101,7 @@ done
 if [ -n "$TS" ]; then
     TS_IP="$("$TS" ip -4 2>/dev/null | head -1)"
     if [ -n "$TS_IP" ]; then
-        ok "From anywhere:  $TS_IP:${BB_NM_PORT:-4000}  (Tailscale) - put this in NoMachine"
+        ok "From anywhere (Tailscale):  vnc://$TS_IP   or NoMachine $TS_IP:${BB_NM_PORT:-4000} if licensed"
     else
         bad "Tailscale installed but not joined - run: sudo $TS up --ssh, then approve the URL"
     fi

@@ -26,8 +26,8 @@
 # or keep all keys in a private repo and pass BB_LICENSE_REPO=owner/repo - see
 # the lookup below for every place it looks.
 #
-# For the VM Macs, which already have their own NoMachine and must not get
-# Tailscale, one flag covers both:
+# NoMachine is off by default (per-machine licence); BB_NOMACHINE=1 enables it
+# on a box that has a key. For the VM Macs, which must not get Tailscale:
 #   curl -fsSL <url> | sudo BB_VM=1 bash
 # It is shorthand for BB_NOMACHINE=0 BB_TAILSCALE=0 - neither is installed, and
 # nothing already on the box is touched or removed. Set either explicitly to
@@ -148,7 +148,7 @@ bash "$REPO_DIR/bb-metrics.sh" install
 #   4. the newest key*.tar.gz in the invoking user's ~/Downloads - i.e. you
 #      downloaded it from your NoMachine User Area on this Mac just now
 # <hostname> is exactly what `scutil --get LocalHostName` prints.
-if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-1}" = "1" ]; then
+if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-0}" = "1" ]; then
     HOSTN="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
     LIC_TMP="$(mktemp -d)"
 
@@ -190,7 +190,7 @@ bash "$REPO_DIR/bb-remote-admin.sh"
 # Mac. If NoMachine is still unlicensed, try the private repo now that the
 # tools are here, then deploy with a quick second pass.
 NX=/Applications/NoMachine.app/Contents/Frameworks/bin/nxserver
-if [ "${BB_NOMACHINE:-1}" = "1" ] && [ -z "${BB_NM_LICENSE:-}" ] && [ -x "$NX" ] \
+if [ "${BB_NOMACHINE:-0}" = "1" ] && [ -z "${BB_NM_LICENSE:-}" ] && [ -x "$NX" ] \
    && "$NX" --subscriptioninfo 2>&1 | grep -q "No subscription found"; then
     step "NoMachine key from $BB_LICENSE_REPO"
     out="${LIC_TMP:-$(mktemp -d)}/$HOSTN.tar.gz"

@@ -39,8 +39,12 @@
 #                                    without it you get a login URL to approve
 #   BB_ADMIN_PUBKEY                  defaults to Joe's laptop key (public, safe
 #                                    in the repo); override to use another key
-#   BB_NOMACHINE=1                   0 = skip the NoMachine step entirely, for
-#                                    boxes that already have their own install
+#   BB_NOMACHINE=0                   1 = install/configure NoMachine. Off by
+#                                    default: NoMachine is licensed per machine,
+#                                    so only boxes with a paid key get it. All
+#                                    others are reached with Screen Sharing over
+#                                    Tailscale (vnc://100.x.x.x), which the
+#                                    script always sets up.
 #   BB_NM_PRODUCT=enterprise-desktop which package to install (or personal-edition)
 #   BB_NM_REINSTALL=0                1 = uninstall whatever NoMachine is there and
 #                                    install BB_NM_PRODUCT fresh (fixes a PE
@@ -186,7 +190,7 @@ fi
 # and starts NoMachine, then reports which permissions are still outstanding.
 # Grant them over Screen Sharing, THEN re-run with BB_DISABLE_SCREENSHARING=1.
 
-if [ "${BB_NOMACHINE:-1}" != "1" ]; then
+if [ "${BB_NOMACHINE:-0}" != "1" ]; then
     skip_step "NoMachine step skipped (BB_NOMACHINE=0) - leaving the existing install untouched"
 else
 
@@ -683,8 +687,8 @@ for s in ${SKIPPED_STEPS[@]+"${SKIPPED_STEPS[@]}"}; do log "  - $s"; done
 log "Log: $LOG_FILE"
 
 log "=== Remote GUI ==="
-if [ "${BB_NOMACHINE:-1}" != "1" ]; then
-    log "NoMachine step was skipped (BB_NOMACHINE=0). Existing install left alone."
+if [ "${BB_NOMACHINE:-0}" != "1" ]; then
+    log "Remote GUI: Screen Sharing over Tailscale. From a device on the tailnet: vnc://$("$TS_BIN" ip -4 2>/dev/null | head -1 || echo '<tailscale-ip>')  (NoMachine not enabled; BB_NOMACHINE=1 for a box with a paid key)"
 elif [ "$NM_READY" -eq 1 ]; then
     log "NoMachine ready on port $BB_NM_PORT. Connect to nx://<tailscale-name>:$BB_NM_PORT"
     if [ "${BB_DISABLE_SCREENSHARING:-0}" != "1" ]; then
