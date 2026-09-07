@@ -21,6 +21,11 @@
 # from inside it - cross-user LaunchAgent bootstrapping was tried and dropped
 # as unreliable (see the switch-user.sh commit), so this does not attempt it.
 #
+# The shared RustDesk password and any NoMachine keys are fetched from the
+# private repo JoeLuci/bb-licenses (one-time `gh` device login per Mac, or
+# BB_LICENSE_TOKEN). So a mini needs nothing on the command line:
+#   curl -fsSL <url> | sudo bash
+#
 # Options are env vars, passed through to the scripts below, e.g.
 #   curl -fsSL <url> | sudo BB_DISABLE_SCREENSHARING=1 bash
 #   curl -fsSL <url> | sudo BB_NM_LICENSE=/Volumes/DRIVE/server.lic bash
@@ -84,18 +89,19 @@ gh_bin() {
 # Pull <hostname>.tar.gz from the private repo into $1. Prefers a gh login
 # on this Mac (as the invoking user), else BB_LICENSE_TOKEN. Returns 1 when
 # neither works or the file is not in the repo.
-fetch_key_from_repo() {
-    local out="$1" GH
+fetch_from_repo() {   # fetch_from_repo <path-in-repo> <out-file>
+    local path="$1" out="$2" GH
     if GH="$(gh_bin)" && sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1; then
-        sudo -u "$CONSOLE_USER" -H "$GH" api "repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" \
+        sudo -u "$CONSOLE_USER" -H "$GH" api "repos/$BB_LICENSE_REPO/contents/$path" \
             -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null || rm -f "$out"
     elif [ -n "${BB_LICENSE_TOKEN:-}" ]; then
         curl -fsSL -H "Authorization: token $BB_LICENSE_TOKEN" \
             -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/$BB_LICENSE_REPO/contents/$HOSTN.tar.gz" -o "$out" 2>/dev/null || rm -f "$out"
+            "https://api.github.com/repos/$BB_LICENSE_REPO/contents/$path" -o "$out" 2>/dev/null || rm -f "$out"
     fi
     [ -s "$out" ]
 }
+fetch_key_from_repo() { fetch_from_repo "$HOSTN.tar.gz" "$1"; }
 
 # Make sure gh exists and is logged in for the invoking user. Installs it
 # with Homebrew (present by now - bb-remote-admin.sh installs Homebrew) and
@@ -191,6 +197,22 @@ fi
 
 step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
 bash "$REPO_DIR/bb-remote-admin.sh"
+
+# Shared RustDesk password lives in the private repo as `rustdesk-password`,
+# so no box needs it on the command line. Homebrew (hence gh) exists by now.
+# Falls back to a generated password (shown by bb-status) if it cannot be
+# fetched - never a stopper.
+if [ "${BB_RUSTDESK:-1}" = "1" ] && [ -z "${BB_RD_PASSWORD:-}" ]; then
+    step "RustDesk password from $BB_LICENSE_REPO"
+    pwf="$(mktemp)"
+    if ensure_gh_login && fetch_from_repo rustdesk-password "$pwf"; then
+        BB_RD_PASSWORD="$(tr -d '\r\n' < "$pwf")"; export BB_RD_PASSWORD
+        echo "Fetched the shared RustDesk password"
+    else
+        echo "Could not fetch it (no GitHub login on this Mac yet?) - a password will be generated; sudo bb-status shows it"
+    fi
+    rm -f "$pwf"
+fi
 
 if [ "${BB_RUSTDESK:-1}" = "1" ]; then
     step "bb-rustdesk.sh (remote GUI)"
