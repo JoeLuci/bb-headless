@@ -39,12 +39,11 @@
 #                                    without it you get a login URL to approve
 #   BB_ADMIN_PUBKEY                  defaults to Joe's laptop key (public, safe
 #                                    in the repo); override to use another key
-#   BB_NOMACHINE=0                   1 = install/configure NoMachine. Off by
-#                                    default: NoMachine is licensed per machine,
-#                                    so only boxes with a paid key get it. All
-#                                    others are reached with Screen Sharing over
-#                                    Tailscale (vnc://100.x.x.x), which the
-#                                    script always sets up.
+#   BB_NOMACHINE=0                   1 = install/configure NoMachine; remove =
+#                                    uninstall it (for a box switched to
+#                                    RustDesk). Off by default - NoMachine is
+#                                    licensed per machine, so only a box with a
+#                                    paid key runs it.
 #   BB_NM_PRODUCT=enterprise-desktop which package to install (or personal-edition)
 #   BB_NM_REINSTALL=0                1 = uninstall whatever NoMachine is there and
 #                                    install BB_NM_PRODUCT fresh (fixes a PE
@@ -190,7 +189,15 @@ fi
 # and starts NoMachine, then reports which permissions are still outstanding.
 # Grant them over Screen Sharing, THEN re-run with BB_DISABLE_SCREENSHARING=1.
 
-if [ "${BB_NOMACHINE:-0}" != "1" ]; then
+if [ "${BB_NOMACHINE:-0}" = "remove" ]; then
+    NM_RM="$(cd "$(dirname "$0")" && pwd)/uninstall-nomachine.sh"
+    if [ -f "$NM_RM" ]; then
+        bash "$NM_RM" 2>&1 | tee -a "$LOG_FILE"
+        done_step "Removed NoMachine (BB_NOMACHINE=remove)"
+    else
+        log "WARNING: $NM_RM missing - cannot remove NoMachine"
+    fi
+elif [ "${BB_NOMACHINE:-0}" != "1" ]; then
     skip_step "NoMachine step skipped (BB_NOMACHINE=0) - leaving the existing install untouched"
 else
 

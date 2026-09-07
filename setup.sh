@@ -132,10 +132,6 @@ step "uninstall-autologin.sh (remove the old bb-autologin system)"
 # cost you the actual install below.
 bash "$REPO_DIR/uninstall-autologin.sh" || echo "WARNING: bb-autologin cleanup failed - carrying on, run it by hand later"
 
-if [ "${BB_REMOVE_RUSTDESK:-0}" = "1" ]; then
-    step "uninstall-rustdesk.sh (BB_REMOVE_RUSTDESK=1)"
-    bash "$REPO_DIR/uninstall-rustdesk.sh" || echo "WARNING: RustDesk cleanup failed - carrying on, run it by hand later"
-fi
 
 step "install.sh (headless BlueBubbles)"
 bash "$REPO_DIR/install.sh"
