@@ -53,6 +53,17 @@ for u in $USERS; do
 done
 
 head_ "Remote access"
+if [ -x /Applications/RustDesk.app/Contents/MacOS/RustDesk ]; then
+    if [ "$IS_ROOT" -eq 1 ]; then
+        bash /Users/Shared/bb-headless/bb-rustdesk.sh status 2>/dev/null | sed 's/^/  /' | sed '1d' | while IFS= read -r l; do
+            case "$l" in *MISSING*|*NOT*) bad "${l#  }" ;; *) ok "${l#  }" ;; esac
+        done
+    else
+        warn "RustDesk installed - run with sudo to see ID, password and permissions"
+    fi
+else
+    warn "RustDesk not installed (BB_RUSTDESK=0, or setup has not run) - Screen Sharing over Tailscale only"
+fi
 NX="/Applications/NoMachine.app/Contents/Frameworks/bin/nxserver"
 if [ -x "$NX" ]; then
     ok "NoMachine installed ($("$NX" --version 2>/dev/null | grep -i version | head -1 || echo version unknown))"
@@ -110,11 +121,6 @@ else
 fi
 
 head_ "Old systems"
-if [ -d /Applications/RustDesk.app ] || ls /Library/LaunchDaemons/com.carriez.*.plist >/dev/null 2>&1 || pgrep -fi rustdesk >/dev/null 2>&1; then
-    warn "RustDesk still present - run uninstall-rustdesk.sh"
-else
-    ok "RustDesk gone"
-fi
 if [ -d /usr/local/lib/bb-autologin ] || [ -f /Library/LaunchDaemons/com.local.bb-autologin.plist ]; then
     warn "bb-autologin still present - run uninstall-autologin.sh"
 else

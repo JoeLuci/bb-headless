@@ -6,7 +6,9 @@
 # Same command whether the Mac is brand new or already running bb-headless:
 # it clones or updates /Users/Shared/bb-headless, then runs
 #   uninstall-autologin - removes the old bb-autologin system if it is present
-#   uninstall-rustdesk  - removes RustDesk if it is present
+#   bb-rustdesk.sh      - RustDesk: the remote GUI for the fleet. Free, no
+#                         per-machine licence, connect by ID + password from
+#                         the RustDesk app anywhere (BB_RUSTDESK=0 to skip)
 #   install.sh          - headless BlueBubbles for every user with a config.db
 #   bb-metrics.sh       - hourly health logger
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
@@ -60,7 +62,8 @@ CONSOLE_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
 if [ "${BB_VM:-0}" = "1" ]; then
     export BB_NOMACHINE="${BB_NOMACHINE:-0}"
     export BB_TAILSCALE="${BB_TAILSCALE:-0}"
-    echo "BB_VM=1: NoMachine and Tailscale steps disabled (nothing installed, nothing removed)"
+    export BB_RUSTDESK="${BB_RUSTDESK:-0}"
+    echo "BB_VM=1: NoMachine, Tailscale and RustDesk steps disabled (nothing installed, nothing removed)"
 fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
@@ -129,8 +132,10 @@ step "uninstall-autologin.sh (remove the old bb-autologin system)"
 # cost you the actual install below.
 bash "$REPO_DIR/uninstall-autologin.sh" || echo "WARNING: bb-autologin cleanup failed - carrying on, run it by hand later"
 
-step "uninstall-rustdesk.sh (remove RustDesk if present)"
-bash "$REPO_DIR/uninstall-rustdesk.sh" || echo "WARNING: RustDesk cleanup failed - carrying on, run it by hand later"
+if [ "${BB_REMOVE_RUSTDESK:-0}" = "1" ]; then
+    step "uninstall-rustdesk.sh (BB_REMOVE_RUSTDESK=1)"
+    bash "$REPO_DIR/uninstall-rustdesk.sh" || echo "WARNING: RustDesk cleanup failed - carrying on, run it by hand later"
+fi
 
 step "install.sh (headless BlueBubbles)"
 bash "$REPO_DIR/install.sh"
@@ -186,6 +191,11 @@ fi
 step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
 bash "$REPO_DIR/bb-remote-admin.sh"
 
+if [ "${BB_RUSTDESK:-1}" = "1" ]; then
+    step "bb-rustdesk.sh (remote GUI)"
+    bash "$REPO_DIR/bb-rustdesk.sh" || echo "WARNING: RustDesk setup failed - see /var/log/bb-rustdesk.log; Screen Sharing over Tailscale still works"
+fi
+
 # The key lookup above runs before Homebrew (and so gh) exists on a fresh
 # Mac. If NoMachine is still unlicensed, try the private repo now that the
 # tools are here, then deploy with a quick second pass.
@@ -223,16 +233,17 @@ cat <<'TXT'
 
    Ten seconds each. Run it as that user - never with sudo.
 
-2. Tick NoMachine in BOTH Privacy panes (they are opening now):
+2. Tick RustDesk in the Privacy panes (they are opening now):
      Screen & System Audio Recording
      Accessibility
+     Input Monitoring (if keyboard/mouse do not work remotely)
    Nothing can grant these from a script - macOS does not allow it.
 
 3. Restart the Mac, then log all five accounts back in.
 TXT
 
 # Only useful if someone is looking at a screen; harmless over SSH.
-for pane in Privacy_ScreenCapture Privacy_Accessibility; do
+for pane in Privacy_ScreenCapture Privacy_Accessibility Privacy_ListenEvent; do
     sudo -u "$CONSOLE_USER" open "x-apple.systempreferences:com.apple.preference.security?$pane" >/dev/null 2>&1 || true
     sleep 1
 done
