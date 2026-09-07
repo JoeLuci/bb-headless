@@ -229,6 +229,35 @@ sleep 3
 "$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || true
 log "Permanent password set; unattended (password-only) approval on"
 
+# ── 4. One ID for the whole box ──────────────────────────────────────────────
+# Every logged-in session runs its own `RustDesk --server`, and each one that
+# starts with an empty config mints its own ID and key pair - so a Mac with
+# five users showed up as five different IDs, and the one a laptop had saved
+# vanished when that session's config was reset. RustDesk's own installer
+# avoids this by copying the console user's config to root; we do the
+# reverse: the root service's config (ID, key pair, password storage) is
+# the master, and every user gets a copy, owned by them. Then restart the
+# session agents so they pick it up.
+ROOT_PREFS="/var/root/Library/Preferences/com.carriez.RustDesk"
+if [ -s "$ROOT_PREFS/RustDesk.toml" ]; then
+    for u in $(dscl . -list /Users UniqueID 2>/dev/null | awk '$2 >= 501 && $2 < 4294967294 {print $1}' | grep -v '^_'); do
+        home="$(dscl . -read "/Users/$u" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+        [ -d "$home" ] || continue
+        d="$home/Library/Preferences/com.carriez.RustDesk"
+        mkdir -p "$d"
+        cp -f "$ROOT_PREFS/RustDesk.toml" "$d/RustDesk.toml"
+        [ -f "$ROOT_PREFS/RustDesk2.toml" ] && cp -f "$ROOT_PREFS/RustDesk2.toml" "$d/RustDesk2.toml"
+        chown -R "$u" "$d"; chmod 700 "$d"; chmod 600 "$d"/*.toml
+    done
+    for uid in $(who | awk '/console/ {print $1}' | sort -u | xargs -n1 id -u 2>/dev/null); do
+        launchctl bootout "gui/$uid/com.carriez.RustDesk_server" 2>/dev/null || true
+        launchctl bootstrap "gui/$uid" "$RD_AGENT_PLIST" 2>>"$LOG_FILE" || true
+    done
+    log "Session agents now share the service's ID $ID"
+else
+    log "WARNING: $ROOT_PREFS/RustDesk.toml missing - sessions may show their own IDs"
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""
 rd_status
