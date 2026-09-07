@@ -116,11 +116,16 @@ ensure_gh_login() {
         GH="$(gh_bin)" || return 1
     fi
     if sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1; then return 0; fi
-    [ -t 1 ] && [ -r /dev/tty ] || return 1
+    [ -w /dev/tty ] || return 1
     echo ""
-    echo ">>> One-time GitHub login on this Mac so it can fetch its NoMachine key from $BB_LICENSE_REPO."
-    echo ">>> A code and a URL will appear: open the URL on any device and enter the code."
-    sudo -u "$CONSOLE_USER" -H "$GH" auth login --hostname github.com --git-protocol https --web </dev/tty >/dev/tty 2>&1 || return 1
+    echo ">>> One-time GitHub login on this Mac so it can read $BB_LICENSE_REPO (password, keys)."
+    echo ">>> A code and a URL will appear below. Open the URL on your phone or laptop,"
+    echo ">>> enter the code, approve. This waits until you do (Ctrl-C to skip)."
+    # stdin from /dev/null makes gh run NON-interactively: no Y/n survey prompt
+    # (which cannot draw inside a piped script), just the device code + URL.
+    sudo -u "$CONSOLE_USER" -H env GH_NO_UPDATE_NOTIFIER=1 "$GH" auth login \
+        --hostname github.com --git-protocol https --web --skip-ssh-key \
+        </dev/null >/dev/tty 2>&1 || return 1
     sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1
 }
 
