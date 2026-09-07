@@ -49,6 +49,21 @@ rd_tcc() {  # 0 = granted
 
 rd_id() { "$RD_BIN" --get-id 2>/dev/null | tr -d '[:space:]' || true; }
 
+# (Re)start the session agent for every user on the console. This must run
+# AS THAT USER: root bootstrapping into another user's gui domain fails with
+# "Bootstrap failed: 5: Input/output error" on current macOS.
+rd_restart_agents() {
+    local u uid
+    for u in $(who | awk '/console/ {print $1}' | sort -u); do
+        uid="$(id -u "$u" 2>/dev/null)" || continue
+        sudo -u "$u" launchctl bootout "gui/$uid/com.carriez.RustDesk_server" 2>/dev/null || true
+        sleep 1
+        sudo -u "$u" launchctl bootstrap "gui/$uid" "$RD_AGENT_PLIST" 2>>"$LOG_FILE" \
+            || sudo -u "$u" launchctl kickstart -k "gui/$uid/com.carriez.RustDesk_server" 2>>"$LOG_FILE" || true
+    done
+    launchctl load -w -S LoginWindow "$RD_AGENT_PLIST" 2>/dev/null || true
+}
+
 rd_status() {
     echo "RustDesk"
     if [ -x "$RD_BIN" ]; then
@@ -193,11 +208,7 @@ launchctl bootout system/com.carriez.RustDesk_service 2>/dev/null || true
 launchctl bootstrap system "$RD_DAEMON_PLIST" 2>>"$LOG_FILE" || launchctl load -w "$RD_DAEMON_PLIST" 2>>"$LOG_FILE" || true
 # Agent: every session that is on the console now, plus the login window so a
 # rebooted Mac is reachable before anyone logs in.
-for uid in $(who | awk '/console/ {print $1}' | sort -u | xargs -n1 id -u 2>/dev/null); do
-    launchctl bootout "gui/$uid/com.carriez.RustDesk_server" 2>/dev/null || true
-    launchctl bootstrap "gui/$uid" "$RD_AGENT_PLIST" 2>>"$LOG_FILE" || true
-done
-launchctl load -w -S LoginWindow "$RD_AGENT_PLIST" 2>/dev/null || true
+rd_restart_agents
 log "Service installed and started"
 
 # ── 3. Password + unattended mode ───────────────────────────────────────────
@@ -249,11 +260,9 @@ if [ -s "$ROOT_PREFS/RustDesk.toml" ]; then
         [ -f "$ROOT_PREFS/RustDesk2.toml" ] && cp -f "$ROOT_PREFS/RustDesk2.toml" "$d/RustDesk2.toml"
         chown -R "$u" "$d"; chmod 700 "$d"; chmod 600 "$d"/*.toml
     done
-    for uid in $(who | awk '/console/ {print $1}' | sort -u | xargs -n1 id -u 2>/dev/null); do
-        launchctl bootout "gui/$uid/com.carriez.RustDesk_server" 2>/dev/null || true
-        launchctl bootstrap "gui/$uid" "$RD_AGENT_PLIST" 2>>"$LOG_FILE" || true
-    done
-    log "Session agents now share the service's ID $ID"
+    rd_restart_agents
+    sleep 3
+    log "Session agents now share the service's ID $ID ($(pgrep -f 'RustDesk --server' | wc -l | tr -d ' ') running)"
 else
     log "WARNING: $ROOT_PREFS/RustDesk.toml missing - sessions may show their own IDs"
 fi
