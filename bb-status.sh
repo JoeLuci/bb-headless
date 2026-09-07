@@ -110,6 +110,11 @@ else
 fi
 
 head_ "Old systems"
+if [ -d /Applications/RustDesk.app ] || ls /Library/LaunchDaemons/com.carriez.*.plist >/dev/null 2>&1 || pgrep -fi rustdesk >/dev/null 2>&1; then
+    warn "RustDesk still present - run uninstall-rustdesk.sh"
+else
+    ok "RustDesk gone"
+fi
 if [ -d /usr/local/lib/bb-autologin ] || [ -f /Library/LaunchDaemons/com.local.bb-autologin.plist ]; then
     warn "bb-autologin still present - run uninstall-autologin.sh"
 else

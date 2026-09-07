@@ -6,6 +6,7 @@
 # Same command whether the Mac is brand new or already running bb-headless:
 # it clones or updates /Users/Shared/bb-headless, then runs
 #   uninstall-autologin - removes the old bb-autologin system if it is present
+#   uninstall-rustdesk  - removes RustDesk if it is present
 #   install.sh          - headless BlueBubbles for every user with a config.db
 #   bb-metrics.sh       - hourly health logger
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
@@ -79,6 +80,9 @@ step "uninstall-autologin.sh (remove the old bb-autologin system)"
 # Never a stopper: this is cleanup of a dead system, and failing it must not
 # cost you the actual install below.
 bash "$REPO_DIR/uninstall-autologin.sh" || echo "WARNING: bb-autologin cleanup failed - carrying on, run it by hand later"
+
+step "uninstall-rustdesk.sh (remove RustDesk if present)"
+bash "$REPO_DIR/uninstall-rustdesk.sh" || echo "WARNING: RustDesk cleanup failed - carrying on, run it by hand later"
 
 step "install.sh (headless BlueBubbles)"
 bash "$REPO_DIR/install.sh"
