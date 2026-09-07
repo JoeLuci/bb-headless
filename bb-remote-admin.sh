@@ -146,6 +146,18 @@ fi
 [ "$(id -u)" -eq 0 ] || die "Run with sudo: sudo bash $0"
 
 id "$BB_ADMIN_USER" >/dev/null 2>&1 || die "Admin user '$BB_ADMIN_USER' does not exist"
+# `id` resolves account names case-insensitively; dscl record paths do not.
+# A box whose account is really "M01" passes the check above and then dies
+# in `dscl . -read /Users/m01` with eDSRecordNotFound. Use the canonical
+# spelling from here on, for the admin and the screen-sharing users alike.
+BB_ADMIN_USER="$(id -un "$BB_ADMIN_USER")"
+_ss=""
+for u in $BB_SCREENSHARING_USERS; do
+    id "$u" >/dev/null 2>&1 || die "Screen-sharing user '$u' does not exist"
+    _ss="$_ss $(id -un "$u")"
+done
+BB_SCREENSHARING_USERS="${_ss# }"
+log "Accounts: admin=$BB_ADMIN_USER screen-sharing=[$BB_SCREENSHARING_USERS]"
 
 GATEWAY="$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}')"
 [ -n "$GATEWAY" ] || die "No default gateway - is the network up?"
@@ -445,20 +457,25 @@ fi
 fi
 
 # ── 2. Screen Sharing (fallback / recovery path) ────────────────────────────
+# This is the fallback, not the primary path. A hiccup here must not abort
+# the run and skip SSH, Tailscale and lockdown behind it - warn and move on.
 if ! dseditgroup -o read "$SS_GROUP" >/dev/null 2>&1; then
-    dseditgroup -o create -q "$SS_GROUP" >/dev/null
-    done_step "Created group $SS_GROUP"
+    if dseditgroup -o create -q "$SS_GROUP" >/dev/null 2>&1; then
+        done_step "Created group $SS_GROUP"
+    else
+        log "WARNING: could not create group $SS_GROUP - Screen Sharing stays unrestricted-by-group"
+    fi
 else
     skip_step "Group $SS_GROUP already exists"
 fi
 
 for u in $BB_SCREENSHARING_USERS; do
-    id "$u" >/dev/null 2>&1 || die "Screen-sharing user '$u' does not exist"
     if dseditgroup -o checkmember -m "$u" "$SS_GROUP" >/dev/null 2>&1; then
         skip_step "$u already in $SS_GROUP"
-    else
-        dseditgroup -o edit -q -a "$u" -t user "$SS_GROUP"
+    elif dseditgroup -o edit -q -a "$u" -t user "$SS_GROUP" >>"$LOG_FILE" 2>&1; then
         done_step "Added $u to $SS_GROUP"
+    else
+        log "WARNING: could not add $u to $SS_GROUP - see $LOG_FILE"
     fi
 done
 
