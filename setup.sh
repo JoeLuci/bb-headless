@@ -28,12 +28,12 @@
 # or keep all keys in a private repo and pass BB_LICENSE_REPO=owner/repo - see
 # the lookup below for every place it looks.
 #
-# NoMachine is off by default (per-machine licence); BB_NOMACHINE=1 enables it
-# on a box that has a key. For the VM Macs, which must not get Tailscale:
+# RustDesk is the fleet's remote GUI; any NoMachine on a mini is removed by
+# default (BB_NOMACHINE=remove). For the VPS boxes - the hosting provider runs
+# NoMachine on those - use VPS mode, which touches none of the remote tools:
 #   curl -fsSL <url> | sudo BB_VM=1 bash
-# It is shorthand for BB_NOMACHINE=0 BB_TAILSCALE=0 - neither is installed, and
-# nothing already on the box is touched or removed. Set either explicitly to
-# override.
+# BB_VM=1 forces BB_NOMACHINE=0 BB_TAILSCALE=0 BB_RUSTDESK=0 and cannot be
+# overridden from the same command - by design.
 #
 # Prerequisites, in this order, or the run is wasted:
 #   1. Each user login already set up in the BlueBubbles Electron app
@@ -59,11 +59,16 @@ CONSOLE_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
 
 # VM Macs: they already have NoMachine, and they must not get Tailscale.
 # 0 means "leave alone" for both - nothing is installed and nothing removed.
+# VPS boxes belong to the hosting provider, who runs NoMachine on every one of
+# them. BB_VM=1 is an absolute hands-off guard: it FORCES all three remote
+# tools to "leave alone" regardless of any default or explicit value, so a
+# VPS can never have RustDesk or Tailscale installed, nor the provider's
+# NoMachine removed. Only BlueBubbles, metrics, SSH and lockdown run there.
 if [ "${BB_VM:-0}" = "1" ]; then
-    export BB_NOMACHINE="${BB_NOMACHINE:-0}"
-    export BB_TAILSCALE="${BB_TAILSCALE:-0}"
-    export BB_RUSTDESK="${BB_RUSTDESK:-0}"
-    echo "BB_VM=1: NoMachine, Tailscale and RustDesk steps disabled (nothing installed, nothing removed)"
+    export BB_NOMACHINE=0
+    export BB_TAILSCALE=0
+    export BB_RUSTDESK=0
+    echo "BB_VM=1: VPS mode - NoMachine, Tailscale and RustDesk are NOT touched (nothing installed, nothing removed)"
 fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
