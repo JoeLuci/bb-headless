@@ -218,9 +218,15 @@ for _ in $(seq 1 15); do
 done
 [ -n "$ID" ] || die "RustDesk service is not answering (no ID after 30s) - see /var/log/rustdesk_service.err"
 
-"$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || die "could not set the permanent password - see $LOG_FILE"
+# On a multi-session box the daemon needs a moment to settle before the
+# password sticks and syncs to the session agent that answers connections;
+# set the options first, then the password, then re-assert it once.
 "$RD_BIN" --option verification-method use-permanent-password >>"$LOG_FILE" 2>&1 || true
 "$RD_BIN" --option approve-mode password >>"$LOG_FILE" 2>&1 || true
+sleep 3
+"$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || die "could not set the permanent password - see $LOG_FILE"
+sleep 3
+"$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || true
 log "Permanent password set; unattended (password-only) approval on"
 
 # ── Summary ─────────────────────────────────────────────────────────────────
