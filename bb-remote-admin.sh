@@ -504,8 +504,13 @@ else
 fi
 
 # ── 3. SSH hardening ────────────────────────────────────────────────────────
-ADMIN_HOME="$(dscl . -read "/Users/$BB_ADMIN_USER" NFSHomeDirectory | awk '{print $2}')"
-[ -d "$ADMIN_HOME" ] || die "Home directory for $BB_ADMIN_USER not found: $ADMIN_HOME"
+# Home dir: the local DS node first, then the full search path, then plain
+# getpwnam via ~user - an account that `id` can see is resolvable by one of
+# them even when `dscl .` answers eDSRecordNotFound.
+ADMIN_HOME="$(dscl . -read "/Users/$BB_ADMIN_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+[ -n "$ADMIN_HOME" ] || ADMIN_HOME="$(dscl /Search -read "/Users/$BB_ADMIN_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+[ -n "$ADMIN_HOME" ] || ADMIN_HOME="$(eval echo "~$BB_ADMIN_USER" 2>/dev/null || true)"
+[ -n "$ADMIN_HOME" ] && [ -d "$ADMIN_HOME" ] || die "Home directory for $BB_ADMIN_USER not found (dscl: $(dscl . -read "/Users/$BB_ADMIN_USER" NFSHomeDirectory 2>&1 | head -1))"
 
 AUTH_KEYS="$ADMIN_HOME/.ssh/authorized_keys"
 if [ -f "$AUTH_KEYS" ] && [ -n "${BB_ADMIN_PUBKEY:-}" ] && grep -qxF "$BB_ADMIN_PUBKEY" "$AUTH_KEYS"; then
