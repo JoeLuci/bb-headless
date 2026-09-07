@@ -52,16 +52,40 @@ rd_id() { "$RD_BIN" --get-id 2>/dev/null | tr -d '[:space:]' || true; }
 # (Re)start the session agent for every user on the console. This must run
 # AS THAT USER: root bootstrapping into another user's gui domain fails with
 # "Bootstrap failed: 5: Input/output error" on current macOS.
+# Only ONE session agent may run: the console user's. Five logged-in users
+# means five agents under one ID and the relay picks the wrong one (you see a
+# background desktop and cannot click). A root watcher daemon keeps it to the
+# console user and follows Fast User Switching. Here: install the watcher,
+# stop every session agent, let the watcher start the right one.
+RD_WATCH="/usr/local/lib/bb-rustdesk/bb-rustdesk-console.sh"
+RD_WATCH_PLIST="/Library/LaunchDaemons/com.bb.rustdesk-console.plist"
 rd_restart_agents() {
     local u uid
     for u in $(who | awk '/console/ {print $1}' | sort -u); do
         uid="$(id -u "$u" 2>/dev/null)" || continue
         sudo -u "$u" launchctl bootout "gui/$uid/com.carriez.RustDesk_server" 2>/dev/null || true
-        sleep 1
-        sudo -u "$u" launchctl bootstrap "gui/$uid" "$RD_AGENT_PLIST" 2>>"$LOG_FILE" \
-            || sudo -u "$u" launchctl kickstart -k "gui/$uid/com.carriez.RustDesk_server" 2>>"$LOG_FILE" || true
+        pkill -u "$u" -f "RustDesk --server" 2>/dev/null || true
     done
     launchctl load -w -S LoginWindow "$RD_AGENT_PLIST" 2>/dev/null || true
+    mkdir -p "$(dirname "$RD_WATCH")"
+    cp -f "$(cd "$(dirname "$0")" && pwd)/bb-rustdesk-console.sh" "$RD_WATCH" 2>/dev/null \
+        || cp -f /Users/Shared/bb-headless/bb-rustdesk-console.sh "$RD_WATCH"
+    chmod 755 "$RD_WATCH"
+    cat > "$RD_WATCH_PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.bb.rustdesk-console</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$RD_WATCH</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/bb-rustdesk-console.log</string>
+</dict></plist>
+PL
+    chown root:wheel "$RD_WATCH_PLIST"; chmod 644 "$RD_WATCH_PLIST"
+    launchctl bootout system/com.bb.rustdesk-console 2>/dev/null || true
+    launchctl bootstrap system "$RD_WATCH_PLIST" 2>>"$LOG_FILE" || true
+    sleep 4
 }
 
 rd_status() {
@@ -76,6 +100,8 @@ rd_status() {
     else
         echo "  service: NOT running (sudo bash $0 to repair)"
     fi
+    echo "  console user: $(stat -f %Su /dev/console 2>/dev/null) - session agents running: $(pgrep -f 'RustDesk --server' | wc -l | tr -d ' ') (should be 1)"
+    launchctl print system/com.bb.rustdesk-console >/dev/null 2>&1 && echo "  console watcher: running" || echo "  console watcher: NOT running (sudo bash $0 to repair)"
     local id; id="$(rd_id)"
     if [ -n "$id" ]; then echo "  ID: $id"; else echo "  ID: (service not answering yet - wait a few seconds and re-run)"; fi
     if [ -s "$RD_PW_FILE" ]; then echo "  password: $(cat "$RD_PW_FILE")"; else echo "  password: (none stored - BB_RD_PASSWORD was given at install, or not set yet)"; fi
@@ -262,7 +288,7 @@ if [ -s "$ROOT_PREFS/RustDesk.toml" ]; then
     done
     rd_restart_agents
     sleep 3
-    log "Session agents now share the service's ID $ID ($(pgrep -f 'RustDesk --server' | wc -l | tr -d ' ') running)"
+    log "Console user $(stat -f %Su /dev/console) has the only session agent, ID $ID ($(pgrep -f 'RustDesk --server' | wc -l | tr -d ' ') running; watcher follows user switching)"
 else
     log "WARNING: $ROOT_PREFS/RustDesk.toml missing - sessions may show their own IDs"
 fi
