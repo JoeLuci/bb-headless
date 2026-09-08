@@ -181,7 +181,21 @@ build_headless() {
 
     # Rebuild native modules for system Node
     log "  Rebuilding native modules for Node.js..."
-    npm install better-sqlite3@latest --no-save >> "$LOG" 2>&1
+    if [ "$(uname -m)" = "x86_64" ]; then
+        # Intel minis only. This `npm install` also fires the BB server's own
+        # postinstall (electron-rebuild), which recompiles node-mac-contacts -
+        # and compiling contacts.mm SEGFAULTS Apple clang 1600, the newest CLT
+        # Sonoma can get, which is as far as the Intel minis go. If that
+        # happens, retry without scripts: better-sqlite3 v13+ ships prebuilt
+        # darwin-x64 bindings in the npm package, so it still loads, and the
+        # require() check below still guards the result.
+        npm install better-sqlite3@latest --no-save >> "$LOG" 2>&1 \
+            || { log "  Intel: postinstall rebuild crashed Sonoma clang - retrying without scripts"
+                 npm install better-sqlite3@latest --no-save --ignore-scripts >> "$LOG" 2>&1; }
+    else
+        # Apple silicon (all the M4s): unchanged, exactly as always.
+        npm install better-sqlite3@latest --no-save >> "$LOG" 2>&1
+    fi
     npm rebuild node-mac-contacts >> "$LOG" 2>&1 || true
     npm rebuild node-mac-permissions >> "$LOG" 2>&1 || true
 
