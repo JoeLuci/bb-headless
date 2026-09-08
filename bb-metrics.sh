@@ -22,6 +22,7 @@
 #   ws_foot_mb        WindowServer footprint, MB (1600 MB = the Aug 16 kill)
 
 set -euo pipefail
+umask 022   # see setup.sh
 
 CSV="/var/log/bb-metrics.csv"
 INSTALL_DIR="/usr/local/lib/bb-metrics"

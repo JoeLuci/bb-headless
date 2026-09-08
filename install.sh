@@ -11,6 +11,7 @@
 # is preserved — headless reads the same config as Electron.
 
 set -euo pipefail
+umask 022   # see setup.sh: sudo inherits the caller's umask; users must reach what root creates
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="/usr/local/lib/bb-headless"
@@ -88,6 +89,7 @@ install_node() {
     # World-readable/executable so every login can run it
     chmod -R a+rX "$NODE_PREFIX"
     mkdir -p /usr/local/bin
+    chmod 755 /usr/local/bin
     ln -sf "$NODE_PREFIX/bin/node" /usr/local/bin/node
     ln -sf "$NODE_PREFIX/bin/npm"  /usr/local/bin/npm
     ln -sf "$NODE_PREFIX/bin/npx"  /usr/local/bin/npx
@@ -331,7 +333,12 @@ deploy_per_user() {
         # Create LaunchAgent
         local agent_dir="$home/Library/LaunchAgents"
         local plist_path="$agent_dir/com.bb-headless.server.plist"
+        # A login that has never had a LaunchAgent has no such directory, and
+        # root is creating it: it must end up the user's, or launchd cannot
+        # start the agent and switch-user.sh cannot write its plist.
         mkdir -p "$agent_dir"
+        chown "$user:staff" "$agent_dir"
+        chmod 755 "$agent_dir"
 
         cat > "$plist_path" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>

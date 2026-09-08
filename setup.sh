@@ -49,6 +49,14 @@
 
 set -euo pipefail
 
+# A provider's macOS image shipped /usr/local/bin as drwx------ root (it
+# predated the install by a month). Every other login then got "command not
+# found" for bb-switch and each user's headless server died trying to exec
+# /usr/local/bin/node from the same directory. So the shared directories are
+# chmod'd explicitly below, never assumed, and the umask is pinned in every
+# root script so the mode of what root creates never depends on the caller.
+umask 022
+
 REPO_URL="https://github.com/JoeLuci/bb-headless.git"
 REPO_DIR="/Users/Shared/bb-headless"
 BRANCH="${BB_BRANCH:-main}"
@@ -158,6 +166,7 @@ chmod -R a+rX "$REPO_DIR"
 # here, right after the clone, so a failure in any step below cannot leave
 # the Mac without them.
 mkdir -p /usr/local/bin
+chmod 755 /usr/local/bin   # the image may ship it 700; repair on every run
 ln -sf "$REPO_DIR/switch-user.sh" /usr/local/bin/bb-switch
 ln -sf "$REPO_DIR/bb-status.sh"   /usr/local/bin/bb-status
 chmod +x "$REPO_DIR/switch-user.sh" "$REPO_DIR/bb-status.sh"

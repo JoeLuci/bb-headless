@@ -28,6 +28,7 @@
 #   BB_RD_VERSION         pin a release tag, e.g. 1.4.9 (else latest)
 
 set -euo pipefail
+umask 022   # see setup.sh
 
 RD_APP="/Applications/RustDesk.app"
 RD_BIN="$RD_APP/Contents/MacOS/RustDesk"

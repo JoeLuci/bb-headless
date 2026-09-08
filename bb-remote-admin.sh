@@ -70,6 +70,7 @@
 #   done
 
 set -euo pipefail
+umask 022   # see setup.sh
 
 BB_ADMIN_USER="${BB_ADMIN_USER:-m01}"
 BB_SCREENSHARING_USERS="${BB_SCREENSHARING_USERS:-m01}"
