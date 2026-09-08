@@ -117,14 +117,32 @@ cp "$SCRIPT_DIR/HOW-TO-INSTALL.txt" /Users/Shared/ 2>/dev/null || true
 cp "$SCRIPT_DIR/HOW-TO-SWITCH-USER.txt" /Users/Shared/ 2>/dev/null || true
 
 # ── 1. Clone or update BlueBubbles ────────────────────────────────────────────
+# The upstream repo is ~600 MB of history (zrok/cloudflared/ngrok binaries are
+# committed for both architectures, plus every past version of each in .git).
+# Only the tip commit is ever built, so clone shallow: ~130 MB transfer and
+# ~80s instead of ~600 MB and ~10 minutes. The clone is NOT piped through
+# tail/tee — tail buffers everything until git exits, so the screen showed
+# nothing for the whole download and the install read as hung. Unpiped, git's
+# own progress bar reaches the terminal.
 clone_or_update() {
+    local url="https://github.com/BlueBubblesApp/bluebubbles-server.git"
     if [ -d "$BB_REPO/.git" ]; then
         log "[1/5] Updating BlueBubbles source..."
-        cd "$BB_REPO" && git pull --ff-only 2>&1 | tail -3 | tee -a "$LOG"
-    else
-        log "[1/5] Cloning BlueBubbles source..."
-        git clone https://github.com/BlueBubblesApp/bluebubbles-server.git "$BB_REPO" 2>&1 | tail -3 | tee -a "$LOG"
+        # fetch+reset, not pull: apply_patches dirties package.json on every
+        # run and a shallow copy cannot fast-forward, so pull would refuse
+        # both. reset --hard keeps untracked files (node_modules survives)
+        # and the patches are re-applied right after, so nothing is lost.
+        if git -C "$BB_REPO" fetch --depth 1 origin master >>"$LOG" 2>&1 \
+           && git -C "$BB_REPO" reset --hard origin/master >>"$LOG" 2>&1; then
+            log "  At $(git -C "$BB_REPO" log --oneline -1)"
+            return
+        fi
+        log "  Update failed (interrupted or corrupt copy) — re-cloning fresh"
+        rm -rf "$BB_REPO"
     fi
+    log "[1/5] Cloning BlueBubbles source (~430 MB checkout, 1-2 min)..."
+    git clone --depth 1 "$url" "$BB_REPO"
+    log "  At $(git -C "$BB_REPO" log --oneline -1)"
 }
 
 # ── 2. Patch for headless ─────────────────────────────────────────────────────
@@ -157,7 +175,7 @@ build_headless() {
     cd "$BB_SERVER"
 
     # Install deps without electron-rebuild
-    log "  Installing dependencies..."
+    log "  Installing dependencies (several minutes, quiet; watch: tail -f $LOG)..."
     npm install --ignore-scripts >> "$LOG" 2>&1
     (cd "$BB_REPO" && npm install --ignore-scripts >> "$LOG" 2>&1)
 
