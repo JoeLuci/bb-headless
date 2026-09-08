@@ -35,9 +35,11 @@
 #
 # RustDesk is the fleet's remote GUI; any NoMachine on a mini is removed by
 # default (BB_NOMACHINE=remove). For the VPS boxes - the hosting provider runs
-# NoMachine on those - use VPS mode, which touches none of the remote tools:
+# NoMachine on those, and that is the way in - use VPS mode:
 #   curl -fsSL <url> | sudo BB_VM=1 bash
-# BB_VM=1 forces BB_NOMACHINE=0 BB_TAILSCALE=0 BB_RUSTDESK=0 and cannot be
+# BB_VM=1 skips bb-remote-admin.sh entirely (no NoMachine, Tailscale,
+# RustDesk, SSH hardening or lockdown) and forces BB_NOMACHINE=0
+# BB_TAILSCALE=0 BB_RUSTDESK=0 for the steps that remain. It cannot be
 # overridden from the same command - by design.
 #
 # Prerequisites, in this order, or the run is wasted:
@@ -62,18 +64,21 @@ command -v git >/dev/null 2>&1 || {
 
 CONSOLE_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
 
-# VM Macs: they already have NoMachine, and they must not get Tailscale.
-# 0 means "leave alone" for both - nothing is installed and nothing removed.
 # VPS boxes belong to the hosting provider, who runs NoMachine on every one of
-# them. BB_VM=1 is an absolute hands-off guard: it FORCES all three remote
-# tools to "leave alone" regardless of any default or explicit value, so a
+# them and is the way in. BB_VM=1 is an absolute hands-off guard: only
+# BlueBubbles and metrics run there. bb-remote-admin.sh is not run at all -
+# its SSH hardening and lockdown are for minis on a home LAN, and its
+# preflight expects the m01 admin account, which a VPS does not have (it
+# died there, and took the bb-switch/bb-status shortcuts with it). The three
+# remote-tool flags are still forced to "leave alone" for the steps in this
+# file that read them, regardless of any default or explicit value, so a
 # VPS can never have RustDesk or Tailscale installed, nor the provider's
-# NoMachine removed. Only BlueBubbles, metrics, SSH and lockdown run there.
+# NoMachine removed.
 if [ "${BB_VM:-0}" = "1" ]; then
     export BB_NOMACHINE=0
     export BB_TAILSCALE=0
     export BB_RUSTDESK=0
-    echo "BB_VM=1: VPS mode - NoMachine, Tailscale and RustDesk are NOT touched (nothing installed, nothing removed)"
+    echo "BB_VM=1: VPS mode - bb-remote-admin.sh is skipped (no NoMachine, Tailscale, RustDesk, SSH or lockdown changes); only BlueBubbles and metrics run"
 fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
@@ -148,6 +153,16 @@ mv "$REPO_DIR.new" "$REPO_DIR"
 echo "At $(git -C "$REPO_DIR" log --oneline -1)"
 chmod -R a+rX "$REPO_DIR"
 
+# Short names so the per-user step is one word instead of a pasted path.
+# switch-user.sh uses absolute paths throughout, so a symlink is safe. Done
+# here, right after the clone, so a failure in any step below cannot leave
+# the Mac without them.
+mkdir -p /usr/local/bin
+ln -sf "$REPO_DIR/switch-user.sh" /usr/local/bin/bb-switch
+ln -sf "$REPO_DIR/bb-status.sh"   /usr/local/bin/bb-status
+chmod +x "$REPO_DIR/switch-user.sh" "$REPO_DIR/bb-status.sh"
+echo "Installed 'bb-switch' and 'bb-status'"
+
 step "uninstall-autologin.sh (remove the old bb-autologin system)"
 # Never a stopper: this is cleanup of a dead system, and failing it must not
 # cost you the actual install below.
@@ -205,8 +220,12 @@ if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-0}" = "1" ]; then
     fi
 fi
 
-step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
-bash "$REPO_DIR/bb-remote-admin.sh"
+if [ "${BB_VM:-0}" = "1" ]; then
+    step "bb-remote-admin.sh SKIPPED (BB_VM=1: the provider's NoMachine is the way in)"
+else
+    step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
+    bash "$REPO_DIR/bb-remote-admin.sh"
+fi
 
 # Shared RustDesk password lives in the private repo as `rustdesk-password`,
 # so no box needs it on the command line. Homebrew (hence gh) exists by now.
@@ -250,15 +269,16 @@ if [ "${BB_NOMACHINE:-0}" = "1" ] && [ -z "${BB_NM_LICENSE:-}" ] && [ -x "$NX" ]
     fi
 fi
 
-# Short name so the per-user step is one word instead of a pasted path.
-# switch-user.sh uses absolute paths throughout, so a symlink is safe.
-mkdir -p /usr/local/bin
-ln -sf "$REPO_DIR/switch-user.sh" /usr/local/bin/bb-switch
-ln -sf "$REPO_DIR/bb-status.sh"   /usr/local/bin/bb-status
-chmod +x "$REPO_DIR/switch-user.sh" "$REPO_DIR/bb-status.sh"
-echo "Installed 'bb-switch' and 'bb-status'"
-
 step "What is left to do by hand"
+if [ "${BB_VM:-0}" = "1" ]; then
+cat <<'TXT'
+1. In EACH user login on this box, open Terminal, and run:
+
+     bb-switch
+
+   Ten seconds each. Run it as that user - never with sudo.
+TXT
+else
 cat <<'TXT'
 1. Fast User Switch into EACH user login, open Terminal, and run:
 
@@ -280,6 +300,7 @@ for pane in Privacy_ScreenCapture Privacy_Accessibility Privacy_ListenEvent; do
     sudo -u "$CONSOLE_USER" open "x-apple.systempreferences:com.apple.preference.security?$pane" >/dev/null 2>&1 || true
     sleep 1
 done
+fi
 
 step "Checking what actually took"
 bash "$REPO_DIR/bb-status.sh" || true
