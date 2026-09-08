@@ -199,23 +199,31 @@ build_headless() {
     npm rebuild node-mac-contacts >> "$LOG" 2>&1 || true
     npm rebuild node-mac-permissions >> "$LOG" 2>&1 || true
 
-    # Intel minis only: Sonoma-era clang SEGFAULTS (instead of erroring) when
-    # the machine is memory-starved - five logins with Electron apps running
-    # is exactly that - so the two rebuilds above can fail silently. But
-    # headless.js hard-requires both modules at startup, so shipping without
-    # them deploys a crash-looping server for every user. Verify each binding
-    # loads; retry the rebuild a couple of times (pressure is transient),
-    # then stop rather than deploy something broken.
+    # Intel minis only: Sonoma-era Intel clang (clang-1600, the newest CLT
+    # macOS 14 can get) SEGFAULTS in the LLVM register allocator when
+    # node-gyp's -gdwarf-2 debug-info flag meets these ObjC++ files -
+    # deterministic, found by bisecting the exact failing compile. So the
+    # two rebuilds above fail silently, but headless.js hard-requires both
+    # modules at startup: shipping without them deploys a crash-looping
+    # server for every user. Rebuild through a compiler shim that strips
+    # just -gdwarf-2 (binding is identical minus debug-info format), verify
+    # each binding loads, and stop rather than deploy something broken.
     if [ "$(uname -m)" = "x86_64" ]; then
+        SHIM_DIR="$INSTALL_DIR/cc-shim"
+        mkdir -p "$SHIM_DIR"
+        for tool in cc c++; do
+            printf '#!/bin/bash\nargs=(); for a in "$@"; do [ "$a" = "-gdwarf-2" ] || args+=("$a"); done\nexec /usr/bin/%s "${args[@]}"\n' "$tool" > "$SHIM_DIR/$tool"
+            chmod +x "$SHIM_DIR/$tool"
+        done
         for m in node-mac-contacts node-mac-permissions; do
             for try in 1 2 3; do
                 "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1 && break
-                log "  $m binding missing (clang crash under memory pressure?) - rebuild retry $try"
-                npm rebuild "$m" >> "$LOG" 2>&1 || true
+                log "  $m binding missing (Intel clang -gdwarf-2 crash) - rebuilding with shim, try $try"
+                CC="$SHIM_DIR/cc" CXX="$SHIM_DIR/c++" npm rebuild "$m" >> "$LOG" 2>&1 || true
             done
             if ! "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1; then
-                log "ERROR: $m failed to build after retries - aborting before deploying a crash-looping server."
-                log "       Free up memory (quit apps, log out unused users, or reboot) and re-run: sudo bash install.sh"
+                log "ERROR: $m failed to build even with the -gdwarf-2 shim - aborting before deploying a crash-looping server."
+                log "       See $LOG for the compile error, then re-run: sudo bash install.sh"
                 exit 1
             fi
         done
