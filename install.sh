@@ -200,29 +200,43 @@ build_headless() {
     npm rebuild node-mac-permissions >> "$LOG" 2>&1 || true
 
     # Intel minis only: Sonoma-era Intel clang (clang-1600, the newest CLT
-    # macOS 14 can get) SEGFAULTS in the LLVM register allocator when
-    # node-gyp's -gdwarf-2 debug-info flag meets these ObjC++ files -
-    # deterministic, found by bisecting the exact failing compile. So the
-    # two rebuilds above fail silently, but headless.js hard-requires both
-    # modules at startup: shipping without them deploys a crash-looping
-    # server for every user. Rebuild through a compiler shim that strips
-    # just -gdwarf-2 (binding is identical minus debug-info format), verify
-    # each binding loads, and stop rather than deploy something broken.
+    # macOS 14 can get) SEGFAULTS in the LLVM register allocator compiling
+    # these ObjC++ files - deterministic, established by bisecting the exact
+    # failing compiles on an Intel mini: permissions.mm dies with node-gyp's
+    # -gdwarf-2, contacts.mm dies at -O1/-O2/-O3 even without it. Both
+    # compile clean with debug info off and -O0. So the two rebuilds above
+    # fail silently, but headless.js hard-requires both modules at startup:
+    # shipping without them deploys a crash-looping server for every user.
+    # Rebuild through a compiler shim that strips -gdwarf-2 and downgrades
+    # -O flags (these are thin permission/contact wrappers; optimization is
+    # irrelevant), verify each binding loads, and stop rather than deploy
+    # something broken.
     if [ "$(uname -m)" = "x86_64" ]; then
         SHIM_DIR="$INSTALL_DIR/cc-shim"
         mkdir -p "$SHIM_DIR"
         for tool in cc c++; do
-            printf '#!/bin/bash\nargs=(); for a in "$@"; do [ "$a" = "-gdwarf-2" ] || args+=("$a"); done\nexec /usr/bin/%s "${args[@]}"\n' "$tool" > "$SHIM_DIR/$tool"
+            cat > "$SHIM_DIR/$tool" <<SHIM
+#!/bin/bash
+args=()
+for a in "\$@"; do
+    case "\$a" in
+        -gdwarf-2) ;;
+        -O1|-O2|-O3) args+=("-O0") ;;
+        *) args+=("\$a") ;;
+    esac
+done
+exec /usr/bin/$tool "\${args[@]}"
+SHIM
             chmod +x "$SHIM_DIR/$tool"
         done
         for m in node-mac-contacts node-mac-permissions; do
             for try in 1 2 3; do
                 "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1 && break
-                log "  $m binding missing (Intel clang -gdwarf-2 crash) - rebuilding with shim, try $try"
+                log "  $m binding missing (Intel clang ICE) - rebuilding with shim, try $try"
                 CC="$SHIM_DIR/cc" CXX="$SHIM_DIR/c++" npm rebuild "$m" >> "$LOG" 2>&1 || true
             done
             if ! "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1; then
-                log "ERROR: $m failed to build even with the -gdwarf-2 shim - aborting before deploying a crash-looping server."
+                log "ERROR: $m failed to build even with the compiler shim - aborting before deploying a crash-looping server."
                 log "       See $LOG for the compile error, then re-run: sudo bash install.sh"
                 exit 1
             fi
