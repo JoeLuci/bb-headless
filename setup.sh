@@ -112,7 +112,12 @@ ensure_gh_login() {
     if ! GH="$(gh_bin)"; then
         for BREW in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$BREW" ] && break; done
         [ -x "$BREW" ] || return 1
-        sudo -u "$(stat -f %Su "$(dirname "$(dirname "$BREW")")")" -H "$BREW" install gh >/dev/null 2>&1 || return 1
+        # Intel minis: /usr/local is root-owned and brew refuses to run as
+        # root - fall back to the owner of the brew binary itself.
+        local BREW_OWNER
+        BREW_OWNER="$(stat -f %Su "$(dirname "$(dirname "$BREW")")")"
+        [ "$BREW_OWNER" = "root" ] && BREW_OWNER="$(stat -f %Su "$BREW")"
+        sudo -u "$BREW_OWNER" -H "$BREW" install gh >/dev/null 2>&1 || return 1
         GH="$(gh_bin)" || return 1
     fi
     if sudo -u "$CONSOLE_USER" -H "$GH" auth status >/dev/null 2>&1; then return 0; fi

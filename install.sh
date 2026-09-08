@@ -199,6 +199,29 @@ build_headless() {
     npm rebuild node-mac-contacts >> "$LOG" 2>&1 || true
     npm rebuild node-mac-permissions >> "$LOG" 2>&1 || true
 
+    # Intel minis only: Sonoma-era clang SEGFAULTS (instead of erroring) when
+    # the machine is memory-starved - five logins with Electron apps running
+    # is exactly that - so the two rebuilds above can fail silently. But
+    # headless.js hard-requires both modules at startup, so shipping without
+    # them deploys a crash-looping server for every user. Verify each binding
+    # loads; retry the rebuild a couple of times (pressure is transient),
+    # then stop rather than deploy something broken.
+    if [ "$(uname -m)" = "x86_64" ]; then
+        for m in node-mac-contacts node-mac-permissions; do
+            for try in 1 2 3; do
+                "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1 && break
+                log "  $m binding missing (clang crash under memory pressure?) - rebuild retry $try"
+                npm rebuild "$m" >> "$LOG" 2>&1 || true
+            done
+            if ! "$NODE_BIN" -e "require('$m')" >/dev/null 2>&1; then
+                log "ERROR: $m failed to build after retries - aborting before deploying a crash-looping server."
+                log "       Free up memory (quit apps, log out unused users, or reboot) and re-run: sudo bash install.sh"
+                exit 1
+            fi
+        done
+        log "  Intel: node-mac-contacts and node-mac-permissions verified loadable"
+    fi
+
     # Verify the DB module actually loads with the system node. A half-installed
     # node_modules (e.g. a previous install interrupted mid-`npm install`) is
     # otherwise only discovered at user runtime as a crash-looping server.

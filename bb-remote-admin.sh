@@ -621,6 +621,10 @@ if [ ! -x "$BREW" ]; then
     done_step "Installed Homebrew for $BREW_USER"
 fi
 BREW_OWNER="$(stat -f %Su "$BREW_PREFIX")"
+# Intel minis: /usr/local itself stays root-owned (Homebrew only owns subdirs
+# there, unlike /opt/homebrew on Apple silicon), and brew refuses to run as
+# root - use the owner of the brew binary instead.
+[ "$BREW_OWNER" = "root" ] && BREW_OWNER="$(stat -f %Su "$BREW")"
 
 if [ -x "$TS_BIN" ]; then
     skip_step "Tailscale already installed"
