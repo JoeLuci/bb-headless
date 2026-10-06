@@ -17,7 +17,7 @@
 #
 # What it never touches: BlueBubbles servers, Messages/iCloud sign-in, RustDesk,
 # Cloudflare, Tailscale, bb-metrics, bb-rustdesk-console, logins. It records
-# which of those are RUNNING before it starts and exits 2 if any stopped.
+# which resident ones are RUNNING before it starts and exits 2 if any stopped.
 #
 # Usage (same shape as bb-metrics.sh):
 #   sudo bash bb-tune.sh install     install boot daemon + apply now (fully unattended)
@@ -60,7 +60,9 @@ LOG_CAP_MB=1024
 VOLUMES="/ /System/Volumes/Data"
 PHOTO_AGENTS="com.apple.photoanalysisd com.apple.mediaanalysisd"
 KNOWLEDGE_AGENTS="com.apple.spotlightknowledged com.apple.knowledgeconstructiond"
-CRITICAL_SYSTEM="com.carriez.RustDesk_service com.bb.rustdesk-console com.cloudflare.cloudflared com.tailscale.tailscaled com.local.bb-metrics"
+# resident services only: bb-metrics is an hourly job that runs for a second and exits,
+# so it must not be here (it tripped the guard once, right after setup.sh reinstalled it)
+CRITICAL_SYSTEM="com.carriez.RustDesk_service com.bb.rustdesk-console com.cloudflare.cloudflared com.tailscale.tailscaled"
 CRITICAL_USER="com.bb-headless.server com.carriez.RustDesk_server"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -181,11 +183,17 @@ do_apply() {
         else log "RustDesk build: $(arch_of "$bin")- OK for $(uname -m)"; fi
     fi
 
-    # 6. integrity
+    # 6. integrity - a service mid-restart (installer just reloaded it, console
+    # watcher flipping a RustDesk agent) must not read as lost: re-check 3x over ~15 s
     if [ "$DRY_RUN" != 1 ]; then
-        sleep 2
-        after="$(snapshot_critical)"
-        lost="$(comm -23 <(printf '%s\n' "$before" | sort) <(printf '%s\n' "$after" | sort) | grep .)"
+        local try
+        for try in 1 2 3; do
+            sleep 5
+            after="$(snapshot_critical)"
+            lost="$(comm -23 <(printf '%s\n' "$before" | sort) <(printf '%s\n' "$after" | sort) | grep .)"
+            [ -z "$lost" ] && break
+            log "integrity: $(printf '%s\n' "$lost" | grep -c .) service(s) not seen on check $try/3, re-checking"
+        done
         if [ -n "$lost" ]; then
             log "ERROR: required services running before but NOT now:"; printf '%s\n' "$lost" | while read -r l; do log "   LOST: $l"; done
             log "ERROR: run 'sudo bash $0 restore' and report this"; log "=== apply FAILED ==="; return 2
