@@ -63,6 +63,32 @@ done
 cd /Users/Shared/bb-headless && git pull && sudo bash install.sh
 ```
 
+## Tuning (bb-tune)
+
+`install.sh` ends by running `bb-tune.sh install`, which installs a LaunchDaemon
+(`com.local.bb-tune`) that re-applies at every boot and every 6 h:
+
+- Spotlight indexing off on `/` and `/System/Volumes/Data` (macOS 26 turns it
+  back on after every reboot; with 4-6 logins it alone pushes boot load past 100)
+- per account: Photos/media analysis and Siri knowledge indexing disabled
+- Bluetooth off by disabling the `com.apple.bluetoothd` service (no permission
+  prompt, works over SSH; skipped while a BT keyboard/mouse is attached)
+- bb-headless logs over 1 GB, or belonging to a deleted account, are truncated
+
+It never touches BlueBubbles, Messages/iCloud, RustDesk, Cloudflare, Tailscale
+or logins, records which of those are running first, and exits 2 if any stopped.
+
+```bash
+sudo bash ~/bb-headless/bb-tune.sh status     # what is on/off right now
+sudo bash ~/bb-headless/bb-tune.sh            # re-apply now
+sudo bash ~/bb-headless/bb-tune.sh restore    # undo everything; daemon becomes a no-op
+tail -f /var/log/bb-tune.log
+```
+
+Per-Mac toggles live in `/usr/local/lib/bb-tune/config` (1 on / 0 off):
+`DISABLE_SPOTLIGHT ERASE_SPOTLIGHT_INDEX DISABLE_PHOTO_ANALYSIS DISABLE_KNOWLEDGE
+DISABLE_BLUETOOTH BLUETOOTH_FORCE LOG_CAP_MB`.
+
 ## Revert a Mac to Electron
 
 ```bash

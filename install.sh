@@ -1,6 +1,7 @@
 #!/bin/bash
 # bb-headless installer
-# Clones BlueBubbles, patches for headless, builds, and deploys per-user.
+# Clones BlueBubbles, patches for headless, builds, deploys per-user, and tunes
+# the Mac (bb-tune.sh: Spotlight + Bluetooth off, re-applied at every boot).
 #
 # Usage:
 #   sudo bash install.sh              # Install/update on this Mac
@@ -129,7 +130,7 @@ cp "$SCRIPT_DIR/HOW-TO-SWITCH-USER.txt" /Users/Shared/ 2>/dev/null || true
 clone_or_update() {
     local url="https://github.com/BlueBubblesApp/bluebubbles-server.git"
     if [ -d "$BB_REPO/.git" ]; then
-        log "[1/5] Updating BlueBubbles source..."
+        log "[1/6] Updating BlueBubbles source..."
         # fetch+reset, not pull: apply_patches dirties package.json on every
         # run and a shallow copy cannot fast-forward, so pull would refuse
         # both. reset --hard keeps untracked files (node_modules survives)
@@ -142,14 +143,14 @@ clone_or_update() {
         log "  Update failed (interrupted or corrupt copy) — re-cloning fresh"
         rm -rf "$BB_REPO"
     fi
-    log "[1/5] Cloning BlueBubbles source (~430 MB checkout, 1-2 min)..."
+    log "[1/6] Cloning BlueBubbles source (~430 MB checkout, 1-2 min)..."
     git clone --depth 1 "$url" "$BB_REPO"
     log "  At $(git -C "$BB_REPO" log --oneline -1)"
 }
 
 # ── 2. Patch for headless ─────────────────────────────────────────────────────
 apply_patches() {
-    log "[2/5] Applying headless patches..."
+    log "[2/6] Applying headless patches..."
 
     # Copy our headless files into the BB source
     cp "$SCRIPT_DIR/src/headless.ts" "$BB_SERVER/src/headless.ts"
@@ -173,7 +174,7 @@ apply_patches() {
 
 # ── 3. Build ──────────────────────────────────────────────────────────────────
 build_headless() {
-    log "[3/5] Building headless server..."
+    log "[3/6] Building headless server..."
     cd "$BB_SERVER"
 
     # Install deps without electron-rebuild
@@ -282,7 +283,7 @@ SHIM
 
 # ── 4. Detect users and deploy ────────────────────────────────────────────────
 deploy_per_user() {
-    log "[4/5] Deploying per-user LaunchAgents..."
+    log "[4/6] Deploying per-user LaunchAgents..."
 
     # Ensure build directory is readable by all users
     [ -d "$INSTALL_DIR" ] && chmod -R a+rX "$INSTALL_DIR"
@@ -389,7 +390,7 @@ PLISTEOF
 
 # ── 5. Switch from Electron to headless ───────────────────────────────────────
 activate_headless() {
-    log "[5/5] Activating headless for all configured users..."
+    log "[5/6] Activating headless for all configured users..."
 
     local users=()
     while IFS= read -r u; do
@@ -452,6 +453,22 @@ activate_headless() {
     done
 }
 
+# ── 6. Tune the Mac ──────────────────────────────────────────────────────────
+# With 4-6 logins, Spotlight/Photos/Siri indexing run once per account and push
+# boot-time load past 100: sign-in freezes, servers stop answering. Spotlight
+# also re-enables itself after every reboot on macOS 26, so bb-tune.sh installs
+# a LaunchDaemon that re-applies at boot and every 6h. Never touches BlueBubbles,
+# RustDesk, Cloudflare or Tailscale; it checks they are still running and
+# reports. A failure here must not fail the install.
+tune_mac() {
+    log "[6/6] Tuning: Spotlight + Bluetooth off, boot daemon (bb-tune.sh)..."
+    if bash "$SCRIPT_DIR/bb-tune.sh" install >> "$LOG" 2>&1; then
+        log "  bb-tune installed: re-applies at every boot and every 6h (log: /var/log/bb-tune.log)"
+    else
+        log "  WARNING: bb-tune.sh returned $? - see /var/log/bb-tune.log (BlueBubbles is unaffected)"
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 if ! $DEPLOY_ONLY; then
     clone_or_update
@@ -462,6 +479,7 @@ fi
 if ! $BUILD_ONLY; then
     deploy_per_user
     activate_headless
+    tune_mac
 fi
 
 log ""
