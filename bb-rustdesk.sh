@@ -49,6 +49,15 @@ rd_tcc() {  # 0 = granted
 }
 
 rd_id() { "$RD_BIN" --get-id 2>/dev/null | tr -d '[:space:]' || true; }
+# Is the installed binary built for this CPU? A RustDesk.app installed by hand
+# before this script existed can be the Intel build on an M4: it runs under
+# Rosetta (slower, and it crashed on one mini), so it gets replaced below.
+rd_native() {
+    case "$(uname -m)" in
+        arm64) file "$RD_BIN" 2>/dev/null | grep -q arm64 ;;
+        *)     file "$RD_BIN" 2>/dev/null | grep -q x86_64 ;;
+    esac
+}
 
 # (Re)start the session agent for every user on the console. This must run
 # AS THAT USER: root bootstrapping into another user's gui domain fails with
@@ -121,9 +130,12 @@ rd_status() {
 if [ "${1:-install}" = "status" ]; then rd_status; exit 0; fi
 
 # ── 1. Install ───────────────────────────────────────────────────────────────
-if [ -x "$RD_BIN" ]; then
+if [ -x "$RD_BIN" ] && rd_native; then
     log "RustDesk already installed ($("$RD_BIN" --version 2>/dev/null | head -1 || true))"
 else
+    if [ -x "$RD_BIN" ]; then
+        log "RustDesk installed build is not native to this $(uname -m) Mac (running under Rosetta) - replacing with the native build; ID, password and settings are kept"
+    fi
     case "$(uname -m)" in
         arm64)  RD_ARCH="aarch64" ;;
         x86_64) RD_ARCH="x86_64" ;;
