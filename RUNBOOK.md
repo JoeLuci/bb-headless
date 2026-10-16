@@ -71,19 +71,28 @@ cd /Users/Shared/bb-headless && git pull && sudo bash install.sh
 - Spotlight indexing off on `/` and `/System/Volumes/Data` (macOS 26 turns it
   back on after every reboot; with 4-6 logins it alone pushes boot load past 100)
 - per account: Photos/media analysis and Siri knowledge indexing disabled
-- Bluetooth off by disabling the `com.apple.bluetoothd` service (no permission
-  prompt, works over SSH; skipped while a BT keyboard/mouse is attached)
+- Bluetooth stays ON, and is turned back on if an older bb-tune disabled it:
+  with `com.apple.bluetoothd` disabled, coreaudiod retries its Bluetooth audio
+  plugin non-stop, grows ~5 GB/hour after boot (AZ-03 reached 35 GB on a 16 GB
+  mini after 10 days), pins launchd and can flood logd until the watchdog
+  panics the Mac (AZ-03, 2026-10-16). Turning Bluetooth back on stops the
+  growth; the memory already leaked comes back only with a planned restart in a
+  quiet hour. Never kill coreaudiod on a bloated Mac.
 - bb-headless logs over 1 GB, or belonging to a deleted account, are truncated
 
 It never touches BlueBubbles, Messages/iCloud, RustDesk, Cloudflare, Tailscale
 or logins, records which of those are running first, and exits 2 if any stopped.
 
 ```bash
-sudo bash ~/bb-headless/bb-tune.sh status     # what is on/off right now
-sudo bash ~/bb-headless/bb-tune.sh            # re-apply now
-sudo bash ~/bb-headless/bb-tune.sh restore    # undo everything; daemon becomes a no-op
+cd /Users/Shared/bb-headless && git pull && sudo bash bb-tune.sh install   # update bb-tune only (no rebuild)
+sudo bash /Users/Shared/bb-headless/bb-tune.sh status     # what is on/off right now
+sudo bash /Users/Shared/bb-headless/bb-tune.sh            # re-apply now
+sudo bash /Users/Shared/bb-headless/bb-tune.sh restore    # undo the tuning; daemon then only keeps Bluetooth on and caps logs
 tail -f /var/log/bb-tune.log
 ```
+
+A Mac still running a bb-tune older than 2026-10-16 turns Bluetooth back off every
+6 h. Until it is updated, pin it on: `echo DISABLE_BLUETOOTH=0 | sudo tee -a /usr/local/lib/bb-tune/config`.
 
 Per-Mac toggles live in `/usr/local/lib/bb-tune/config` (1 on / 0 off):
 `DISABLE_SPOTLIGHT ERASE_SPOTLIGHT_INDEX DISABLE_PHOTO_ANALYSIS DISABLE_KNOWLEDGE

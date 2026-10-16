@@ -1,7 +1,7 @@
 #!/bin/bash
 # bb-headless installer
 # Clones BlueBubbles, patches for headless, builds, deploys per-user, and tunes
-# the Mac (bb-tune.sh: Spotlight + Bluetooth off, re-applied at every boot).
+# the Mac (bb-tune.sh: Spotlight off, re-applied at every boot).
 #
 # Usage:
 #   sudo bash install.sh              # Install/update on this Mac
@@ -461,7 +461,7 @@ activate_headless() {
 # RustDesk, Cloudflare or Tailscale; it checks they are still running and
 # reports. A failure here must not fail the install.
 tune_mac() {
-    log "[6/6] Tuning: Spotlight + Bluetooth off, boot daemon (bb-tune.sh)..."
+    log "[6/6] Tuning: Spotlight off, boot daemon (bb-tune.sh)..."
     if bash "$SCRIPT_DIR/bb-tune.sh" install >> "$LOG" 2>&1; then
         log "  bb-tune installed: re-applies at every boot and every 6h (log: /var/log/bb-tune.log)"
     else

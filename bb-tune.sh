@@ -1,5 +1,5 @@
 #!/bin/bash
-# bb-tune.sh - keep a BlueBubbles relay Mac quiet: Spotlight + Bluetooth off, at every boot
+# bb-tune.sh - keep a BlueBubbles relay Mac quiet: Spotlight off, at every boot
 #
 # A relay Mac with 4-6 accounts logged in runs every "desktop Mac" background
 # job once per account. At boot that stacks up to a load average of 100+ and
@@ -10,10 +10,16 @@
 #   - Spotlight indexing on / and /System/Volumes/Data   (comes back ON after
 #     every reboot on macOS 26, which is why this runs as a boot daemon)
 #   - per account: Photos/media analysis, Siri knowledge indexing
-#   - Bluetooth: the com.apple.bluetoothd system service is disabled at the launchd
-#     level (no permission prompt, no Homebrew, works over SSH, persists across
-#     reboots); skipped automatically while a Bluetooth keyboard/mouse/trackpad is
-#     connected
+#
+# Bluetooth stays ON. With com.apple.bluetoothd disabled, coreaudiod's Bluetooth
+# audio plugin retries its connection to bluetoothd several times a millisecond,
+# forever: coreaudiod grows ~5 GB/hour after boot (AZ-03 reached 35 GB on a 16 GB
+# mini after 10 days), launchd sits at 80% CPU and the log storm can jam logd
+# until the watchdog panics the Mac (AZ-03, 2026-10-16). So apply turns
+# bluetoothd back on if an older bb-tune disabled it. That stops the growth, but
+# coreaudiod keeps what it already leaked until the Mac restarts: reclaim it with
+# a planned restart in a quiet hour. Never kill coreaudiod on a bloated Mac (that
+# is what panicked AZ-03). DISABLE_BLUETOOTH=1 still works but brings it all back.
 #
 # What it never touches: BlueBubbles servers, Messages/iCloud sign-in, RustDesk,
 # Cloudflare, Tailscale, bb-metrics, bb-rustdesk-console, logins. It records
@@ -29,7 +35,7 @@
 # Daemon: com.local.bb-tune, RunAtLoad + every 6h, log /var/log/bb-tune.log
 # Config: /usr/local/lib/bb-tune/config  (1 = on, 0 = off)
 #   DISABLE_SPOTLIGHT=1  ERASE_SPOTLIGHT_INDEX=1  DISABLE_PHOTO_ANALYSIS=1
-#   DISABLE_KNOWLEDGE=1  DISABLE_BLUETOOTH=1  BLUETOOTH_FORCE=0  LOG_CAP_MB=1024
+#   DISABLE_KNOWLEDGE=1  DISABLE_BLUETOOTH=0  BLUETOOTH_FORCE=0  LOG_CAP_MB=1024
 #
 # Exit codes: 0 ok (warnings possible, see log), 1 install/usage error,
 #             2 a required service was running before and is not now.
@@ -52,7 +58,7 @@ DISABLE_SPOTLIGHT=1
 ERASE_SPOTLIGHT_INDEX=1
 DISABLE_PHOTO_ANALYSIS=1
 DISABLE_KNOWLEDGE=1
-DISABLE_BLUETOOTH=1
+DISABLE_BLUETOOTH=0   # keep 0: a disabled bluetoothd makes coreaudiod leak (see header)
 BLUETOOTH_FORCE=0
 LOG_CAP_MB=1024
 [ -f "$CONF" ] && . "$CONF"
@@ -96,12 +102,14 @@ enable_agent()  { run launchctl enable  "gui/$1/$2" 2>/dev/null || run launchctl
 
 BT_SVC="com.apple.bluetoothd"
 bt_running()  { pgrep -x bluetoothd >/dev/null 2>&1; }
-bt_disabled() { launchctl print-disabled system 2>/dev/null | grep -q "\"$BT_SVC\" => disabled"; }
+bt_disabled() { launchctl print-disabled system 2>/dev/null | grep -qE "\"$BT_SVC\" => (disabled|true)"; }
+bt_loaded()   { launchctl print "system/$BT_SVC" >/dev/null 2>&1; }   # registered with launchd = its mach services resolve
 bt_hid_connected() {   # any Bluetooth keyboard/mouse/trackpad attached right now? (ioreg: fast, never hangs)
     ioreg -r -c IOBluetoothHIDDriver -d 1 2>/dev/null | grep -q '"Product"' ; }
 bt_off() { run launchctl disable "system/$BT_SVC" 2>/dev/null || true; run launchctl bootout "system/$BT_SVC" >/dev/null 2>&1 || true; }
-bt_on()  { run launchctl enable "system/$BT_SVC" 2>/dev/null || true
-           run launchctl bootstrap system "/System/Library/LaunchDaemons/$BT_SVC.plist" >/dev/null 2>&1 || run launchctl kickstart "system/$BT_SVC" >/dev/null 2>&1 || true; }
+bt_on()  { if [ "$DRY_RUN" = 1 ]; then log "would run: launchctl enable system/$BT_SVC ; launchctl bootstrap system /System/Library/LaunchDaemons/$BT_SVC.plist (kickstart fallback)"; return 0; fi
+           launchctl enable "system/$BT_SVC" 2>/dev/null || true
+           BT_ON_ERR="$(launchctl bootstrap system "/System/Library/LaunchDaemons/$BT_SVC.plist" 2>&1)" || launchctl kickstart "system/$BT_SVC" >/dev/null 2>&1 || true; }
 
 arch_of() { file "$1" 2>/dev/null | grep -oE 'x86_64|arm64' | sort -u | tr '\n' ' '; }
 
@@ -148,8 +156,9 @@ do_apply() {
         if bt_hid_connected && [ "$BLUETOOTH_FORCE" != 1 ]; then
             warn "Bluetooth: a Bluetooth keyboard/mouse/trackpad is connected - leaving ON (BLUETOOTH_FORCE=1 overrides)"
         elif bt_disabled && ! bt_running; then
-            log "Bluetooth: already off (bluetoothd disabled)"
+            warn "Bluetooth: already off (DISABLE_BLUETOOTH=1) - coreaudiod spins and leaks memory while bluetoothd is off (see header)"
         else
+            warn "Bluetooth: turning off (DISABLE_BLUETOOTH=1) - coreaudiod will spin and leak memory while bluetoothd is off (see header)"
             [ "$DRY_RUN" = 1 ] && log "would run: launchctl disable system/$BT_SVC ; launchctl bootout system/$BT_SVC"
             bt_off
             if [ "$DRY_RUN" != 1 ]; then
@@ -158,7 +167,16 @@ do_apply() {
                 else warn "Bluetooth: could not disable bluetoothd (disabled=$(bt_disabled && echo yes || echo no), running=$(bt_running && echo yes || echo no))"; fi
             fi
         fi
-    else log "Bluetooth: left as-is (DISABLE_BLUETOOTH=0)"; fi
+    elif bt_disabled || ! bt_loaded; then
+        log "Bluetooth: bluetoothd $(bt_disabled && echo disabled || echo 'not loaded') - turning it back on (coreaudiod needs it)"
+        BT_ON_ERR=""; bt_on
+        if [ "$DRY_RUN" != 1 ]; then
+            sleep 2
+            if ! bt_disabled && bt_loaded; then
+                log "Bluetooth: back on (bluetoothd $(bt_running && echo running || echo 'loaded, idle')). coreaudiod keeps what it already leaked until a restart: plan one in a quiet hour, never kill coreaudiod"
+            else warn "Bluetooth: could not turn bluetoothd back on (disabled=$(bt_disabled && echo yes || echo no), loaded=$(bt_loaded && echo yes || echo no))${BT_ON_ERR:+: $BT_ON_ERR}"; fi
+        fi
+    else log "Bluetooth: on (bluetoothd $(bt_running && echo running || echo 'loaded, idle'))"; fi
 
     # 4. runaway / orphaned bb-headless logs (a deleted account's stale session wrote 3.7 GB in one hour)
     local f lu sz
@@ -211,9 +229,9 @@ do_restore() {
     for v in $VOLUMES; do [ -d "$v" ] && { run mdutil -i on "$v" >/dev/null 2>&1 || true; }; done
     for u in $(detect_users); do uid="$(uid_of "$u")" || continue; for lbl in $PHOTO_AGENTS $KNOWLEDGE_AGENTS; do enable_agent "$uid" "$lbl"; done; done
     bt_on
-    # make the daemon a no-op so it cannot undo this
+    # turn the tuning off so the daemon cannot undo this (it still keeps Bluetooth on and caps logs)
     if [ "$DRY_RUN" != 1 ] && [ -d "$INSTALL_DIR" ]; then
-        printf '# written by restore on %s - daemon is now a no-op\nDISABLE_SPOTLIGHT=0\nERASE_SPOTLIGHT_INDEX=0\nDISABLE_PHOTO_ANALYSIS=0\nDISABLE_KNOWLEDGE=0\nDISABLE_BLUETOOTH=0\n' "$(date)" > "$CONF"
+        printf '# written by restore on %s - daemon now only keeps Bluetooth on and caps logs\nDISABLE_SPOTLIGHT=0\nERASE_SPOTLIGHT_INDEX=0\nDISABLE_PHOTO_ANALYSIS=0\nDISABLE_KNOWLEDGE=0\nDISABLE_BLUETOOTH=0\n' "$(date)" > "$CONF"
     fi
     warn "Spotlight is re-indexing every account now; expect high load for a while"
     log "restored. To re-enable tuning: delete $CONF and run 'sudo bash $0'. To remove the daemon: sudo launchctl bootout system/$PLIST_NAME; sudo rm $PLIST_DST"
@@ -224,7 +242,7 @@ do_status() {
     local v
     echo "host:       $(hostname -s)   $(uname -m)   macOS $(sw_vers -productVersion)   load $(sysctl -n vm.loadavg | awk '{print $2}')"
     for v in $VOLUMES; do [ -d "$v" ] && echo "spotlight:  $v -> $(mdutil -s "$v" 2>/dev/null | tail -1 | tr -d '\t')"; done
-    echo "bluetooth:  bluetoothd $(bt_running && echo running || echo 'not running'), $(bt_disabled && echo disabled || echo enabled)$(bt_hid_connected && echo '  (BT keyboard/mouse connected)')"
+    echo "bluetooth:  bluetoothd $(bt_running && echo running || echo 'not running'), $(bt_disabled && echo disabled || echo enabled)$(bt_hid_connected && echo '  (BT keyboard/mouse connected)')$(bt_disabled && echo '  <- coreaudiod leak: run sudo bash bb-tune.sh')$([ "$DISABLE_BLUETOOTH" = 1 ] && echo '  (DISABLE_BLUETOOTH=1 in config)')"
     echo "daemon:     $(sys_running "$PLIST_NAME" >/dev/null 2>&1 || launchctl print "system/$PLIST_NAME" >/dev/null 2>&1 && echo installed || echo 'not installed')"
     echo "accounts:   $(detect_users | tr '\n' ' ')"
     echo "required services running:"; snapshot_critical | sed 's/^/   /'
@@ -237,8 +255,10 @@ do_install() {
     log "installing to $INSTALL_DIR"
     mkdir -p "$INSTALL_DIR" && cp "$0" "$INSTALL_DIR/bb-tune.sh" && chmod 755 "$INSTALL_DIR/bb-tune.sh" || { log "ERROR: could not copy script"; return 1; }
     if [ ! -f "$CONF" ]; then
-        printf '# bb-tune machine config (1 on, 0 off). Re-applied at boot + every 6h.\n#DISABLE_SPOTLIGHT=1\n#ERASE_SPOTLIGHT_INDEX=1\n#DISABLE_PHOTO_ANALYSIS=1\n#DISABLE_KNOWLEDGE=1\n#DISABLE_BLUETOOTH=1\n#BLUETOOTH_FORCE=0\n#LOG_CAP_MB=1024\n' > "$CONF"
+        printf '# bb-tune machine config (1 on, 0 off). Re-applied at boot + every 6h.\n#DISABLE_SPOTLIGHT=1\n#ERASE_SPOTLIGHT_INDEX=1\n#DISABLE_PHOTO_ANALYSIS=1\n#DISABLE_KNOWLEDGE=1\n#DISABLE_BLUETOOTH=0\n#BLUETOOTH_FORCE=0\n#LOG_CAP_MB=1024\n' > "$CONF"
     fi
+    # configs written before 2026-10-16 show the old default; don't invite uncommenting it
+    sed -i '' 's/^#DISABLE_BLUETOOTH=1$/#DISABLE_BLUETOOTH=0  # keep 0, see header of bb-tune.sh/' "$CONF" 2>/dev/null || true
     chown -R root:wheel "$INSTALL_DIR"
 
     cat > "$PLIST_DST" <<PLIST
