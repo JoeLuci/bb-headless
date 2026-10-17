@@ -98,6 +98,100 @@ Per-Mac toggles live in `/usr/local/lib/bb-tune/config` (1 on / 0 off):
 `DISABLE_SPOTLIGHT ERASE_SPOTLIGHT_INDEX DISABLE_PHOTO_ANALYSIS DISABLE_KNOWLEDGE
 DISABLE_BLUETOOTH BLUETOOTH_FORCE LOG_CAP_MB`.
 
+## VPS boxes (BB_VM=1)
+
+VPS boxes are set up with `curl -fsSL <url> | sudo BB_VM=1 bash`. The provider's
+NoMachine stays the way in to the desktop and is never touched: no RustDesk, SSH
+hardening, lockdown, autologin, firewall or Screen Sharing changes. The one thing
+added is Tailscale, by `bb-tailscale.sh`: Tailscale SSH, served by the open-source
+`tailscaled` system daemon, which keeps working when the desktop does not.
+
+Why: on 2026-10-16 WindowServer crashed on VPS-01. Every GUI session but one died,
+4 of 5 phone lines went down, NoMachine showed "No available desktops", the provider
+panel's Reboot and Screen Sharing hung, and only NoMachine's port is open to the
+internet. Getting a shell for `sudo reboot` took about an hour.
+
+`bb-tailscale.sh` intentionally differs from the Tailscale step in
+`bb-remote-admin.sh` (minis). Do not sync the two without Joe.
+
+### Roll out to an existing box
+
+In Terminal on the box (over NoMachine), from the joe account:
+
+```bash
+sudo git -c safe.directory=/Users/Shared/bb-headless -C /Users/Shared/bb-headless pull
+sudo bash /Users/Shared/bb-headless/bb-tailscale.sh
+```
+
+It installs Homebrew for joe if it is missing, `brew install tailscale`, the system
+daemon (with KeepAlive, so launchd restarts it if it dies), then prints a login URL.
+Open it on your phone (Tailscale app signed in) and tap Approve. It waits 5 minutes;
+a URL approved later still finishes the join, then re-run the script to finish the
+checks. `sudo BB_TS_HOSTNAME=VPS-01 bash ...` also sets the machine name.
+
+It stops and changes nothing if Tailscale.app (the GUI app) is on the box, if the
+box's own address or its gateway is in 100.64.0.0/10 (the range Tailscale uses), or
+if it is not run with sudo from an admin account that owns Homebrew.
+
+Then in the admin console (https://login.tailscale.com/admin/machines), on the
+machine's ... menu:
+
+1. **Disable key expiry.** Otherwise the box drops off the tailnet in ~180 days,
+   probably on the day you need it. `bb-tailscale.sh status` warns while it is on.
+2. **Edit machine name**, e.g. `VPS-01`.
+
+Check from your Mac: `tailscale ssh joe@vps-01 hostname`.
+
+New boxes get all of this from setup.sh, right after the clone and before the
+BlueBubbles build (`BB_TAILSCALE=0` skips it). The steps it prints at the end
+repeat the approve / key expiry / rename list.
+
+### Tailnet SSH policy
+
+Tailscale SSH also needs an `ssh` rule in the tailnet policy file. The default rule
+(`src` autogroup:member, `dst` autogroup:self, action `check`) covers a box joined
+with the interactive login: the box belongs to Joe's identity, so `autogroup:self`
+matches (`check` may ask you to sign in again in a browser now and then).
+
+A box joined with a **tagged auth key** belongs to the tag, not to Joe, so
+`autogroup:self` does not match and SSH is refused until the policy has an explicit
+rule for that tag, for example:
+
+```json
+{"action": "accept", "src": ["autogroup:member"], "dst": ["tag:vps"], "users": ["joe"]}
+```
+
+An auth key goes in a file, never on the command line:
+`sudo BB_TS_AUTHKEY_FILE=/path/to/keyfile bash /Users/Shared/bb-headless/bb-tailscale.sh`
+(the file must be mode 0600; delete it afterwards).
+
+### When the desktop hangs
+
+From your Mac:
+
+```bash
+tailscale ssh joe@vps-01        # or plain: ssh joe@vps-01
+fdesetup status                 # FileVault On or Off?
+sudo reboot                     # FileVault Off
+sudo fdesetup authrestart       # FileVault On: comes back without the unlock screen
+```
+
+### Check, update, remove
+
+```bash
+bash /Users/Shared/bb-headless/bb-tailscale.sh status          # no sudo needed; with sudo it also reads KeepAlive
+sudo bash /Users/Shared/bb-headless/bb-tailscale.sh update     # brew upgrade tailscale, new daemon if it changed
+sudo bash /Users/Shared/bb-headless/uninstall-tailscale.sh     # remove Tailscale completely (run it from NoMachine)
+tail -f /var/log/bb-tailscale.log
+```
+
+A step that restarts `tailscaled` (an update that changed the daemon, a repair)
+would cut a Tailscale SSH session, so inside one the script skips that step and
+exits 3 (joined and verified, only the restart is left). Run it from NoMachine, or over Tailscale SSH with
+`sudo BB_TS_ALLOW_DROP=1 bash /Users/Shared/bb-headless/bb-tailscale.sh update`:
+the restart then runs last, detached; you drop, reconnect in ~30 s and run `status`.
+setup.sh never restarts it from inside a Tailscale SSH session.
+
 ## Revert a Mac to Electron
 
 ```bash

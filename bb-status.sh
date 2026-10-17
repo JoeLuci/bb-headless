@@ -109,15 +109,44 @@ TS=""
 for c in /usr/local/bin/tailscale /opt/homebrew/bin/tailscale; do
     if [ -x "$c" ]; then TS="$c"; break; fi
 done
+# Pinned to the system daemon's socket, as in bb-tailscale.sh, so a Tailscale
+# GUI app can never be the one answering, and time-limited so a wedged
+# tailscaled cannot hang this report. run_limited is the same as in
+# bb-tailscale.sh: TERM, then KILL, after N seconds (Go ignores a bare SIGALRM).
+run_limited() {
+    if ! command -v perl >/dev/null 2>&1; then shift; "$@"; return $?; fi
+    perl -e 'my $t=shift; my $p=fork; defined $p or exit 127; unless($p){exec @ARGV or exit 127} $SIG{ALRM}=sub{kill "TERM",$p; sleep 1; kill "KILL",$p; waitpid $p,0; exit 124}; alarm $t; waitpid $p,0; exit($? & 127 ? 128+($? & 127) : $? >> 8)' "$@"
+}
+ts() { run_limited 15 "$TS" --socket=/var/run/tailscaled.socket "$@"; }
+# plutil prints its errors on stdout with -o -, so a failed extract is discarded.
+ts_json() { local v; v="$(printf '%s' "$1" | plutil -extract "$2" raw -o - - 2>/dev/null)" || v=""; printf '%s' "$v"; }
+TS_FIX="sudo bash /Users/Shared/bb-headless/bb-remote-admin.sh (minis) or sudo bash /Users/Shared/bb-headless/bb-tailscale.sh (VPS)"
 if [ -n "$TS" ]; then
-    TS_IP="$("$TS" ip -4 2>/dev/null | head -1)"
+    TS_IP="$(ts ip -4 2>/dev/null | head -1)"
     if [ -n "$TS_IP" ]; then
         ok "From anywhere (Tailscale):  vnc://$TS_IP   or NoMachine $TS_IP:${BB_NM_PORT:-4000} if licensed"
+        TS_PREFS="$(ts debug prefs 2>/dev/null)"
+        TS_ST="$(ts status --json --peers=false 2>/dev/null)"
+        TS_NAME="$(ts_json "$TS_ST" Self.DNSName)"
+        TS_NAME="${TS_NAME%%.*}"
+        case "$(ts_json "$TS_PREFS" RunSSH)" in
+            true)  ok "Tailscale SSH on - when the desktop hangs: tailscale ssh <admin>@${TS_NAME:-<machine name>}, then sudo reboot" ;;
+            false) warn "Tailscale SSH off - no shell when the desktop hangs. Fix: $TS_FIX" ;;
+            *)     warn "Tailscale SSH: could not read (run with sudo)" ;;
+        esac
+        # "off" only when the same JSON answered with a backend state.
+        if [ -z "$(ts_json "$TS_ST" BackendState)" ]; then
+            warn "Tailscale key expiry: could not read (run with sudo)"
+        else
+            TS_EXP="$(ts_json "$TS_ST" Self.KeyExpiry)"
+            if [ -n "$TS_EXP" ]; then warn "Tailscale key expires $TS_EXP - disable key expiry for this machine in the admin console"
+            else ok "Tailscale key expiry off"; fi
+        fi
     else
-        bad "Tailscale installed but not joined - run: sudo $TS up --ssh, then approve the URL"
+        bad "Tailscale installed but not joined - run: $TS_FIX, then approve the URL"
     fi
 else
-    warn "No Tailscale - this Mac is reachable on the LAN ONLY. Fine for a VM with its own public address; on a mini it means no access while travelling."
+    warn "No Tailscale - this Mac is reachable on the LAN ONLY, and there is no shell when the desktop hangs. Set it up: $TS_FIX"
 fi
 
 head_ "Old systems"
@@ -128,5 +157,5 @@ else
 fi
 
 head_ "Logs"
-echo "  /var/log/bb-headless-install.log   /var/log/bb-remote-admin.log"
+echo "  /var/log/bb-headless-install.log   /var/log/bb-remote-admin.log   /var/log/bb-tailscale.log"
 echo "  /var/log/bb-headless-<user>.log    ~/Library/Logs/bb-headless.log"

@@ -14,6 +14,9 @@
 #   bb-remote-admin.sh  - NoMachine, Screen Sharing fallback, SSH, lockdown,
 #                         and Tailscale (the address that makes NoMachine
 #                         reachable from outside the LAN)
+#   bb-tailscale.sh     - VPS boxes only (BB_VM=1), in place of the above:
+#                         Tailscale with Tailscale SSH, a shell that still
+#                         works when the desktop hangs
 # then installs the `bb-switch` and `bb-status` shortcuts, opens the two Privacy
 # panes, and prints a per-user check of what actually took (`sudo bb-status`).
 #
@@ -35,12 +38,14 @@
 #
 # RustDesk is the fleet's remote GUI; any NoMachine on a mini is removed by
 # default (BB_NOMACHINE=remove). For the VPS boxes - the hosting provider runs
-# NoMachine on those, and that is the way in - use VPS mode:
+# NoMachine on those, and that is the way in to the desktop - use VPS mode:
 #   curl -fsSL <url> | sudo BB_VM=1 bash
-# BB_VM=1 skips bb-remote-admin.sh entirely (no NoMachine, Tailscale,
-# RustDesk, SSH hardening or lockdown) and forces BB_NOMACHINE=0
-# BB_TAILSCALE=0 BB_RUSTDESK=0 for the steps that remain. It cannot be
-# overridden from the same command - by design.
+# BB_VM=1 skips bb-remote-admin.sh entirely (no NoMachine, RustDesk, SSH
+# hardening or lockdown) and forces BB_NOMACHINE=0 BB_RUSTDESK=0 for the
+# steps that remain. It cannot be overridden from the same command - by
+# design. The one thing it adds is Tailscale, via bb-tailscale.sh, before
+# the BlueBubbles build: Tailscale SSH is the way in when the desktop hangs.
+# BB_TAILSCALE=0 skips it.
 #
 # Prerequisites, in this order, or the run is wasted:
 #   1. Each user login already set up in the BlueBubbles Electron app
@@ -73,20 +78,23 @@ command -v git >/dev/null 2>&1 || {
 CONSOLE_USER="${SUDO_USER:-$(stat -f %Su /dev/console)}"
 
 # VPS boxes belong to the hosting provider, who runs NoMachine on every one of
-# them and is the way in. BB_VM=1 is an absolute hands-off guard: only
-# BlueBubbles and metrics run there. bb-remote-admin.sh is not run at all -
-# its SSH hardening and lockdown are for minis on a home LAN, and its
+# them and is the way in to the desktop. BB_VM=1 is a hands-off guard: only
+# BlueBubbles, metrics and Tailscale run there. bb-remote-admin.sh is not run
+# at all - its SSH hardening and lockdown are for minis on a home LAN, and its
 # preflight expects the m01 admin account, which a VPS does not have (it
-# died there, and took the bb-switch/bb-status shortcuts with it). The three
-# remote-tool flags are still forced to "leave alone" for the steps in this
-# file that read them, regardless of any default or explicit value, so a
-# VPS can never have RustDesk or Tailscale installed, nor the provider's
-# NoMachine removed.
+# died there, and took the bb-switch/bb-status shortcuts with it). The
+# NoMachine and RustDesk flags are still forced to "leave alone" for the steps
+# in this file that read them, regardless of any default or explicit value,
+# so a VPS can never have RustDesk installed, nor the provider's NoMachine
+# removed. Tailscale is the exception, on purpose: when WindowServer hung on
+# VPS-01 (2026-10-16) NoMachine had no desktop to show and getting a shell
+# took an hour. bb-tailscale.sh (run right after the clone, below) gives every
+# VPS a tailnet shell that does not depend on the GUI. BB_TAILSCALE unset or 1
+# runs it; any other value skips it (removal: sudo bash uninstall-tailscale.sh).
 if [ "${BB_VM:-0}" = "1" ]; then
     export BB_NOMACHINE=0
-    export BB_TAILSCALE=0
     export BB_RUSTDESK=0
-    echo "BB_VM=1: VPS mode - bb-remote-admin.sh is skipped (no NoMachine, Tailscale, RustDesk, SSH or lockdown changes); only BlueBubbles and metrics run"
+    echo "BB_VM=1: VPS mode - bb-remote-admin.sh is skipped (no NoMachine, RustDesk, SSH or lockdown changes); BlueBubbles, metrics and Tailscale (bb-tailscale.sh, BB_TAILSCALE=0 skips it) run"
 fi
 
 step() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
@@ -172,6 +180,27 @@ ln -sf "$REPO_DIR/bb-status.sh"   /usr/local/bin/bb-status
 chmod +x "$REPO_DIR/switch-user.sh" "$REPO_DIR/bb-status.sh"
 echo "Installed 'bb-switch' and 'bb-status'"
 
+# VPS only: Tailscale comes right after the clone, so the way in that does not
+# depend on the desktop exists even if the BlueBubbles build below fails.
+# stdin is /dev/null because stdin is the curl pipe (the login URL still prints
+# and it waits up to 5 min for approval). INT is ignored around it so Ctrl-C
+# skips the Tailscale join only, never the rest of this run. Exit 3 = joined
+# and verified, only a tailscaled restart was refused (Tailscale SSH session).
+if [ "${BB_VM:-0}" = "1" ]; then
+    if [ "${BB_TAILSCALE:-1}" = "1" ]; then
+        step "bb-tailscale.sh (Tailscale SSH: a shell that works when the desktop hangs)"
+        TS_RC=0
+        trap '' INT; BB_TS_FROM_SETUP=1 bash "$REPO_DIR/bb-tailscale.sh" </dev/null || TS_RC=$?; trap - INT
+        if [ "$TS_RC" = 3 ]; then
+            echo "Tailscale is up; re-run sudo bash $REPO_DIR/bb-tailscale.sh standalone (from NoMachine, or with sudo BB_TS_ALLOW_DROP=1) to finish the daemon restart"
+        elif [ "$TS_RC" != 0 ]; then
+            echo "WARNING: Tailscale not set up - re-run sudo bash $REPO_DIR/bb-tailscale.sh"
+        fi
+    else
+        step "bb-tailscale.sh SKIPPED (BB_TAILSCALE=$BB_TAILSCALE; to remove Tailscale: sudo bash $REPO_DIR/uninstall-tailscale.sh)"
+    fi
+fi
+
 step "uninstall-autologin.sh (remove the old bb-autologin system)"
 # Never a stopper: this is cleanup of a dead system, and failing it must not
 # cost you the actual install below.
@@ -230,7 +259,7 @@ if [ -z "${BB_NM_LICENSE:-}" ] && [ "${BB_NOMACHINE:-0}" = "1" ]; then
 fi
 
 if [ "${BB_VM:-0}" = "1" ]; then
-    step "bb-remote-admin.sh SKIPPED (BB_VM=1: the provider's NoMachine is the way in)"
+    step "bb-remote-admin.sh SKIPPED (BB_VM=1: the provider's NoMachine is the way in to the desktop, Tailscale SSH the way in when it hangs)"
 else
     step "bb-remote-admin.sh (NoMachine, SSH, lockdown)"
     bash "$REPO_DIR/bb-remote-admin.sh"
@@ -287,6 +316,24 @@ cat <<'TXT'
 
    Ten seconds each. Run it as that user - never with sudo.
 TXT
+if [ "${BB_TAILSCALE:-1}" = "1" ]; then
+cat <<'TXT'
+
+2. Tailscale: if a login URL was printed above and is not approved yet, open
+   it on your phone (Tailscale app signed in) and tap Approve.
+
+3. In the Tailscale admin console (login.tailscale.com/admin/machines), on
+   this machine's ... menu:
+     Disable key expiry   (or it drops off the tailnet in ~180 days)
+     Edit machine name    (e.g. VPS-01)
+
+4. When the desktop hangs (NoMachine shows "No available desktops"), from
+   your Mac:
+     tailscale ssh joe@<machine name>
+     sudo reboot          (sudo fdesetup authrestart if FileVault is On)
+   sudo bash /Users/Shared/bb-headless/bb-tailscale.sh status shows the name.
+TXT
+fi
 else
 cat <<'TXT'
 1. Fast User Switch into EACH user login, open Terminal, and run:
