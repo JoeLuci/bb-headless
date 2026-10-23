@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "type": "full",
+  "agent_version": "1.0.0",
+  "platform_uuid": "8F1C2D3E-4B5A-6978-8899-AABBCCDDEEFF",
+  "command_results": [
+    { "id": "6f1c1d1e-2b3a-4c5d-8e9f-0a1b2c3d4e5f", "result": "ok", "output": "kickstart -k gui/503/com.bb-headless.server" }
+  ],
+  "host": {
+    "hostname": "Test-Mac-01",
+    "arch": "arm64",
+    "macos": "26.3",
+    "uptime_s": 873000,
+    "cores_physical": 10,
+    "load1": 179.8,
+    "load5": 190.6,
+    "load15": 175.7,
+    "load_high_s": 7200,
+    "load_starved_s": 7200,
+    "memlevel": 66,
+    "swap_used_mb": 483,
+    "swap_total_mb": 2048,
+    "bluetooth": true,
+    "filevault": "off",
+    "filevault_checked_s": 240,
+    "filevault_raw": "FileVault is Off."
+  },
+  "coreaudiod": { "pid": 8405, "cpu": 146.9, "cpu_hot_s": 24000, "footprint_mb": 190, "footprint_age_s": 1800 },
+  "windowserver": { "pid": 190, "cpu": 12.5, "footprint_mb": 1201, "footprint_age_s": 120 },
+  "top": [
+    { "pid": 8405, "uid": 202, "cpu": 146.9, "rss_mb": 189, "path": "/usr/sbin/coreaudiod" },
+    { "pid": 2124, "uid": 504, "cpu": 100.0, "rss_mb": 25, "path": "/usr/sbin/universalaccessd" }
+  ],
+  "users": [
+    {
+      "name": "m01", "uid": 501, "socket_port": 1254,
+      "server_address": "https://user-test-line-one.example.com",
+      "gui_session": true, "gui_session_age_s": 873000,
+      "server_pid": 955, "server_age_s": 873000, "server_listening": true,
+      "pid_changes_10m": 0, "job_disabled": false, "electron_running": false,
+      "probe": "not_answering", "not_answering_s": 7200,
+      "still_failing_after_restart": false, "needs_person": false,
+      "fix_state": "skipped", "fix_skip_reason": "starved"
+    },
+    {
+      "name": "m02", "uid": 502, "socket_port": 1284,
+      "server_address": "https://user-test-line-two.example.com",
+      "gui_session": true, "gui_session_age_s": 873000,
+      "server_pid": 1528, "server_age_s": 873000, "server_listening": true,
+      "pid_changes_10m": 0, "job_disabled": false, "electron_running": false,
+      "probe": "answering", "not_answering_s": 0,
+      "still_failing_after_restart": false, "needs_person": false,
+      "fix_state": "ok", "fix_skip_reason": null
+    }
+  ],
+  "process_fixes": [
+    { "uid": 504, "path": "/usr/sbin/universalaccessd", "state": "skipped_audio" }
+  ],
+  "fixes": [
+    {
+      "mac_event_id": "0b7a8c9d-1e2f-4a3b-9c4d-5e6f7a8b9c0d", "at_s_ago": 30, "code": "restart_line",
+      "target": { "uid": 503, "path": null }, "result": "ok", "note": "not answering 3 checks"
+    }
+  ]
+}

@@ -192,6 +192,27 @@ exits 3 (joined and verified, only the restart is left). Run it from NoMachine, 
 the restart then runs last, detached; you drop, reconnect in ~30 s and run `status`.
 setup.sh never restarts it from inside a Tailscale SSH session.
 
+## Mac Health watchdog (bb-watchdog)
+
+Reports this Mac to Viato every minute (Super Admin > Viato Phone > Management > Mac
+Health) and runs the actions clicked there. With Auto-fix on it restarts a line
+server that stopped answering and quits a stuck universalaccessd / ControlCenter;
+it never kills coreaudiod or WindowServer and never restarts the Mac on its own.
+
+```bash
+# Connect: Mac Health > Connect on this Mac's row, then run what it shows:
+sudo git -c safe.directory=/Users/Shared/bb-headless -C /Users/Shared/bb-headless pull && sudo bash /Users/Shared/bb-headless/bb-watchdog.sh install
+# (paste the one-time code at the prompt; it never goes on the command line)
+
+bash /opt/bb-watchdog/bb-watchdog.sh status      # daemon, mode, last cycle, last log lines
+tail -50 /var/log/bb-watchdog.log
+sudo bash /opt/bb-watchdog/bb-watchdog.sh uninstall
+```
+
+Files: `/opt/bb-watchdog` (its own root-owned node, the script, the key),
+`/var/db/bb-watchdog/state.json`, LaunchDaemon `com.local.bb-watchdog`.
+Tests: `node --test test/bb-watchdog.test.js`.
+
 ## Revert a Mac to Electron
 
 ```bash
