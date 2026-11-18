@@ -274,9 +274,28 @@ done
 "$RD_BIN" --option verification-method use-permanent-password >>"$LOG_FILE" 2>&1 || true
 "$RD_BIN" --option approve-mode password >>"$LOG_FILE" 2>&1 || true
 sleep 3
-"$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || die "could not set the permanent password - see $LOG_FILE"
-sleep 3
-"$RD_BIN" --password "$PW" >>"$LOG_FILE" 2>&1 || true
+# `--password` exits 0 even when the daemon refuses it: it prints "Changing
+# permanent password was rejected by daemon" (seen on 1.5.1, a few seconds
+# after the service starts) and the password is never set, while the stored
+# one in $RD_PW_FILE looks valid. So read its output and retry until the
+# daemon accepts ("Done!"), and fail loudly if it never does.
+rd_set_password() {
+    local out i
+    for i in $(seq 1 10); do
+        out="$("$RD_BIN" --password "$PW" 2>&1)"
+        printf '%s\n' "$out" >>"$LOG_FILE"
+        case "$out" in
+            *[Rr]ejected*|*[Ee]rror*|*[Ff]ail*|*[Rr]equire*|*[Dd]isabled*)
+                log "password attempt $i/10 refused: ${out:-<no output>} - retrying in 5s"
+                sleep 5 ;;
+            *Done*) return 0 ;;
+            *)  log "WARNING: unexpected reply to --password: '${out:-<no output>}' - assuming set, test a connection"
+                return 0 ;;
+        esac
+    done
+    return 1
+}
+rd_set_password || die "RustDesk daemon refused the permanent password 10 times - NOT set. Re-run: sudo bash $0 (or set it in RustDesk > Settings > Security)"
 log "Permanent password set; unattended (password-only) approval on"
 
 # ── 4. One ID for the whole box ──────────────────────────────────────────────
