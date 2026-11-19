@@ -32,7 +32,9 @@ class BrowserWindow {
     constructor() {
         this.webContents = { send() {}, isDestroyed() { return true; } };
     }
+    isDestroyed() { return false; }
     isMinimized() { return false; }
+    isVisible() { return false; }
     minimize() {} restore() {} focus() {} close() {} destroy() {} show() {} hide() {}
 }
 

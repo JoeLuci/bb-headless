@@ -97,7 +97,9 @@ export class BrowserWindow {
         send(_channel: string, ..._args: any[]) {},
         isDestroyed() { return true; },
     };
+    isDestroyed() { return false; }
     isMinimized() { return false; }
+    isVisible() { return false; }
     minimize() {}
     restore() {}
     focus() {}
